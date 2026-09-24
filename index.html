@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>asymbode — Asymptotic Bode Diagram Trainer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="toolbar">
+  <div class="brand" title="Asymptotic Bode diagram trainer">asymbode</div>
+
+  <label class="tf-label" title="Transfer function in poles-and-zeros form">G(s)&nbsp;=
+    <input id="tfInput" type="text" spellcheck="false" autocomplete="off"
+           placeholder="\frac{1}{1+10^{-4}s}" value="1/(1+10^{-4}s)">
+  </label>
+  <button id="btnLoad" class="btn primary" title="Parse the transfer function and start an exercise (Enter)">Load</button>
+
+  <span class="sep"></span>
+
+  <div class="tools" role="radiogroup" aria-label="Tools">
+    <button class="tool active" data-tool="select" title="Select / drag line & markers (V)">Select</button>
+    <button class="tool" data-tool="zero" title="Place a zero — dotted +20 dB/dec preview (Z)">⊕ Zero</button>
+    <button class="tool" data-tool="pole" title="Place a pole — dotted −20 dB/dec preview (P)">⊖ Pole</button>
+    <button class="tool" data-tool="czero" title="Place a complex-conjugate zero pair (+40 dB/dec) (C)">◇ C.Zero</button>
+    <button class="tool" data-tool="cpole" title="Place a complex-conjugate pole pair (−40 dB/dec) (X)">◈ C.Pole</button>
+    <button class="tool" data-tool="delete" title="Click a marker to remove it (D)">✕ Delete</button>
+  </div>
+
+  <span class="sep"></span>
+
+  <button id="btnCheck" class="btn accent" title="Show the true (asymptotic) solution and check your work — hold Ctrl for the real Bode plot">Show solution &amp; Check</button>
+  <button id="btnClear" class="btn" title="Clear your drawn poles/zeros and gain (keeps the loaded TF)">Clear</button>
+  <button id="btnFit" class="btn" title="Fit axes to all elements (F)">Fit view</button>
+
+  <span class="sep"></span>
+
+  <button id="btnExportPng" class="btn" title="Download the current diagrams as a PNG image">Export PNG</button>
+  <button id="btnCopyImg" class="btn" title="Copy the current diagrams as an image — paste straight into AFFiNE">Copy image</button>
+</header>
+
+<div id="tfError" class="tf-error" hidden></div>
+<div id="tfOk" class="tf-ok" hidden></div>
+
+<main class="workspace">
+  <section class="plots">
+    <div class="plot-head">
+      <h2>Magnitude <span class="unit">dB</span></h2>
+      <div class="legend" id="legend">
+        <span class="lg-item"><i class="lg-line user"></i>your asymptote</span>
+        <span class="lg-item" id="lgSolution" hidden><i class="lg-line sol"></i>solution</span>
+        <span class="lg-item" id="lgExact" hidden><i class="lg-line exact"></i>real Bode (Ctrl)</span>
+        <span class="lg-item"><i class="lg-dot zero"></i>zero</span>
+        <span class="lg-item"><i class="lg-dot pole"></i>pole</span>
+        <span class="lg-item"><i class="lg-dot cplx"></i>complex pair</span>
+      </div>
+    </div>
+    <div class="canvas-wrap" id="magWrap"><canvas id="magCanvas"></canvas></div>
+
+    <div class="plot-head">
+      <h2>Phase <span class="unit">deg</span></h2>
+    </div>
+    <div class="canvas-wrap" id="phWrap"><canvas id="phCanvas"></canvas></div>
+
+    <div class="drag-tip" id="dragTip" hidden></div>
+  </section>
+
+  <aside class="sidebar">
+    <section class="panel">
+      <h3>Poles / zeros at the origin</h3>
+      <div class="origin-row">
+        <span class="origin-label" title="Zeros at s=0 — raise initial slope by +20 dB/dec each">zeros&nbsp;s<sup>n</sup></span>
+        <button class="mini" id="z0Minus" title="Remove one zero at origin">−</button>
+        <span class="count" id="z0Count">0</span>
+        <button class="mini" id="z0Plus" title="Add a zero at origin (differentiator)">+</button>
+      </div>
+      <div class="origin-row">
+        <span class="origin-label" title="Poles at s=0 — lower initial slope by −20 dB/dec each">poles&nbsp;1/s<sup>n</sup></span>
+        <button class="mini" id="p0Minus" title="Remove one pole at origin">−</button>
+        <span class="count" id="p0Count">0</span>
+        <button class="mini" id="p0Plus" title="Add a pole at origin (integrator)">+</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Your elements</h3>
+      <div id="elemList" class="elem-list">
+        <div class="empty-hint">Nothing placed yet — pick a Zero/Pole tool and click on a plot.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Gain</h3>
+      <div class="gain-row">
+        <label for="gainInput">20&nbsp;lg|K|</label>
+        <input id="gainInput" type="number" step="0.1" value="0" min="-200" max="200">
+        <span class="unit">dB</span>
+        <button class="mini" id="gainSignBtn" title="Sign of K (negative K shifts the phase by 180°)">K:&nbsp;+</button>
+      </div>
+      <div class="gain-hint">|K| = <span id="gainLin">1</span> &nbsp;·&nbsp; drag the magnitude line vertically to adjust</div>
+    </section>
+
+    <section class="panel">
+      <h3>Solution &amp; check</h3>
+      <div id="checkResults" class="check-results">
+        <div class="empty-hint">Load a transfer function, draw your asymptote, then press <b>Show solution &amp; Check</b>.</div>
+      </div>
+    </section>
+
+    <section class="panel help">
+      <h3>Help</h3>
+      <ul>
+        <li>Accepts e.g. <code>\frac{1}{1+10^{-4}s}</code>, <code>10*(1+s/10)/(s*(1+s/1000))</code>, <code>2*10^4/(s^2+1.4*s+100)</code></li>
+        <li>Click on a plot with a Zero/Pole tool to place; click again on the same spot to increase its order (×2 → +40&nbsp;dB/dec…)</li>
+        <li><b>Shift + hover</b> a marker (or just hover while placing) shows its raw ±20&nbsp;dB/dec power as a dotted line</li>
+        <li><b>Drag the line</b> vertically → gain · <b>drag a marker</b> → corner frequency · background drag pans · wheel zooms ω</li>
+        <li><b>Ctrl</b> (while the solution is shown) switches it to the real Bode plot</li>
+        <li>Keys: <code>V</code> select · <code>Z</code> zero · <code>P</code> pole · <code>C</code>/<code>X</code> complex · <code>D</code> delete · <code>F</code> fit · <code>Del</code> remove selected · <code>Esc</code> back to select</li>
+      </ul>
+    </section>
+  </aside>
+</main>
+
+<footer class="status" id="status">Ready.</footer>
+
+<script src="bode-math.js"></script>
+<script src="bode-app.js"></script>
+</body>
+</html>
