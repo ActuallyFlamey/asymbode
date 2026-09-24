@@ -220,7 +220,7 @@ function parseAtom(toks, pos) {
   if (tk.t === 'id') {
     if (tk.v === 's') return [{ t: 's' }, pos + 1];
     const looksFn = pos + 1 < toks.length && toks[pos + 1].t === 'op' && toks[pos + 1].v === '(';
-    if (looksFn) throw new ParseError('Unsupported function "' + tk.v + '" — time delays (exp) are not allowed; use poles & zeros');
+    if (looksFn) throw new ParseError('Unsupported function "' + tk.v + '" — time delays (exp) are not allowed; use poles & zeroes');
     throw new ParseError('Unknown symbol "' + tk.v + '" — only "s" may appear; write a numeric gain instead');
   }
   if (tk.t === 'op' && tk.v === '(') {
@@ -848,7 +848,7 @@ function checkSolution(tf, user, opts) {
   // --- origin orders ---
   items.push({
     ok: tf.z0 === user.z0, kind: 'origin',
-    text: 'Zeros at origin s' + sup(tf.z0) + ': expected ' + tf.z0 + ', you drew ' + user.z0,
+    text: 'Zeroes at origin s' + sup(tf.z0) + ': expected ' + tf.z0 + ', you drew ' + user.z0,
   });
   items.push({
     ok: tf.p0 === user.p0, kind: 'origin',
@@ -890,7 +890,7 @@ function checkSolution(tf, user, opts) {
       if (t.kind === 'complex') {
         const dbl = uCl.some((u, i) => !used[i] && u.type === t.type && u.kind === 'real' &&
           Math.abs(Math.log10(u.w / t.w)) <= tolDec && u.order >= 2 * t.order);
-        if (dbl) hint = ' — you drew real poles/zeros (same magnitude slope, but phase differs)';
+        if (dbl) hint = ' — you drew real poles/zeroes (same magnitude slope, but phase differs)';
       } else if (t.kind === 'real' && t.order >= 2) {
         const cx = uCl.some((u, i) => !used[i] && u.type === t.type && u.kind === 'complex' &&
           Math.abs(Math.log10(u.w / t.w)) <= tolDec);

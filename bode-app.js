@@ -1023,7 +1023,7 @@ function loadTF() {
       els.checkResults.innerHTML = '<div class="empty-hint">Load a transfer function, draw your asymptote, then press <b>Show solution &amp; Check</b>.</div>';
     showMsg(els.tfOk, 'G(s) loaded — ' + tfSummary(tf), true);
     showMsg(els.tfError, '', false);
-    setStatus('Transfer function loaded — place poles &amp; zeros to match its Bode plot, then <b>Show solution &amp; Check</b>');
+    setStatus('Transfer function loaded — place poles &amp; zeroes to match its Bode plot, then <b>Show solution &amp; Check</b>');
     return tf;
   } catch (err) {
     state.tf = null;
@@ -1371,12 +1371,12 @@ function init() {
 
   document.getElementById('z0Plus').addEventListener('click', () => {
     state.user.z0 = clamp(state.user.z0 + 1, 0, 8);
-    setStatus('Zeros at origin: s' + supStr(state.user.z0) + ' → initial slope +' + (20 * state.user.z0) + ' dB/dec');
+    setStatus('Zeroes at origin: s' + supStr(state.user.z0) + ' → initial slope +' + (20 * state.user.z0) + ' dB/dec');
     recordHistory(); updateSidebar(); render();
   });
   document.getElementById('z0Minus').addEventListener('click', () => {
     state.user.z0 = clamp(state.user.z0 - 1, 0, 8);
-    setStatus('Zeros at origin: s' + supStr(state.user.z0));
+    setStatus('Zeroes at origin: s' + supStr(state.user.z0));
     recordHistory(); updateSidebar(); render();
   });
   document.getElementById('p0Plus').addEventListener('click', () => {
@@ -1420,9 +1420,9 @@ function init() {
       state.syncPlots = els.syncToggle.checked;
       if (state.syncPlots) {
         for (const e of state.user.elems) e.plots = ['mag', 'ph'];
-        setStatus('Mirror edits <b>on</b> — poles/zeros now appear on both graphs at once');
+        setStatus('Mirror edits <b>on</b> — poles/zeroes now appear on both graphs at once');
       } else {
-        setStatus('Mirror edits <b>off</b> — new poles/zeros stay on the graph you place them on');
+        setStatus('Mirror edits <b>off</b> — new poles/zeroes stay on the graph you place them on');
       }
       recordHistory();
       updateSidebar();
