@@ -277,11 +277,13 @@ function drawPolyline(ctx, pts, g, yr, color, width, dash) {
   ctx.restore();
 }
 
-/** Raw-power ghost: dotted slope preview (mag plot only). */
-function ghostPoints() {
+/** Raw-power ghost for `plot`: dotted preview shown only while hovering that plot.
+ *  magnitude → the element's ±20 dB/dec (or ±40) slope from its corner;
+ *  phase     → the element's phase ramp (0 → ±90°/±180° over corner±1 decade). */
+function ghostPoints(plot) {
   const u = state.user;
   const hov = state.hover;
-  if (!hov) return null;
+  if (!hov || !hov.inPlot || hov.plot !== plot) return null;
   const t = state.tool;
   const placeTool = t === 'zero' || t === 'pole' || t === 'czero' || t === 'cpole';
 
@@ -304,14 +306,31 @@ function ghostPoints() {
     xc = BM.cornerX(e);
   } else return null;
 
-  if (xc < state.view.xmin || xc > state.view.xmax) return null;
-  const y0 = BM.asymMag(u, xc);
-  const slope = BM.magSlopeUnit(elem) * elem.order;
-  const xmax = state.view.xmax;
-  return {
-    xc,
-    pts: [{ x: xc, y: y0 }, { x: xmax, y: y0 + slope * (xmax - xc) }],
-  };
+  const xmin = state.view.xmin, xmax = state.view.xmax;
+  if (xc < xmin || xc > xmax) return null;
+
+  if (plot === 'mag') {
+    const y0 = BM.asymMag(u, xc);
+    const slope = BM.magSlopeUnit(elem) * elem.order;
+    return {
+      xc,
+      pts: [{ x: xc, y: y0 }, { x: xmax, y: y0 + slope * (xmax - xc) }],
+    };
+  }
+
+  // phase: ramp from 0 at the corner − 1 decade to the total at corner + 1 decade,
+  // starting from the current phase level where the ramp begins.
+  const total = BM.phaseTotal(elem) * elem.order;
+  const xa = xc - 1, xb = xc + 1;
+  const y0 = BM.asymPhase(u, xa);
+  const rampY = (x) => y0 + total * Math.min(1, Math.max(0, (x - xa) / 2));
+  const xs = [Math.max(xmin, xa), xa, xb, xmax]
+    .filter(x => x >= xmin && x <= xmax)
+    .sort((a, b) => a - b);
+  const uniq = [];
+  for (const x of xs) if (!uniq.length || x - uniq[uniq.length - 1] > 1e-12) uniq.push(x);
+  if (uniq.length < 2) return null;
+  return { xc, pts: uniq.map(x => ({ x, y: rampY(x) })) };
 }
 
 function elemColor(e) { return e.type === 'zero' ? DARK.zero : DARK.pole; }
@@ -467,9 +486,11 @@ function render() {
     }
   }
 
-  // raw-power ghost (dotted)
-  const gh = ghostPoints();
-  if (gh) drawPolyline(magCtx, gh.pts, gy, state.yMag, 'rgba(255,255,255,0.55)', 1.4, [4, 4]);
+  // raw-power ghost (dotted) — only on the plot currently being hovered
+  const ghMag = ghostPoints('mag');
+  if (ghMag) drawPolyline(magCtx, ghMag.pts, gy, state.yMag, 'rgba(255,255,255,0.55)', 1.4, [4, 4]);
+  const ghPh = ghostPoints('ph');
+  if (ghPh) drawPolyline(phCtx, ghPh.pts, gp, state.yPh, 'rgba(255,255,255,0.55)', 1.4, [4, 4]);
 
   drawMarkers(magCtx, magW, magH, state.yMag, 'mag');
   drawMarkers(phCtx, phW, phH, state.yPh, 'ph');
@@ -1266,7 +1287,7 @@ window.__bode = {
   state, setTool, render, resizeAll, setStatus,
   loadTF, placeAt, removeElem, clearUser, updateSidebar, fitView,
   showSolutionAndCheck, setCtrlHeld, updateLegend,
-  composeExport, exportPng, copyImage,
+  composeExport, exportPng, copyImage, ghostPoints,
   helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem },
 };
 
