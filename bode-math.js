@@ -1066,7 +1066,85 @@ function texHtml(node, minPrec, opts) {
 /**
  * Build the live G(s) preview HTML from separate numerator/denominator field
  * text. Never throws: unparseable input falls back to the raw text.
+ *
+ * Numeric scalar factors are peeled out of N/D and rendered beside the
+ * fraction as K:  G(s) = K · N′(s)/D′(s)  (LaTeX-style).
  */
+function evalConst(n) {
+  switch (n && n.t) {
+    case 'num': return n.v;
+    case 's': return null;
+    case 'neg': { const a = evalConst(n.a); return a == null ? null : -a; }
+    case 'add': { const a = evalConst(n.a), b = evalConst(n.b); return (a == null || b == null) ? null : a + b; }
+    case 'sub': { const a = evalConst(n.a), b = evalConst(n.b); return (a == null || b == null) ? null : a - b; }
+    case 'mul': { const a = evalConst(n.a), b = evalConst(n.b); return (a == null || b == null) ? null : a * b; }
+    case 'div': { const a = evalConst(n.a), b = evalConst(n.b); return (a == null || b == null || b === 0) ? null : a / b; }
+    case 'pow': { const a = evalConst(n.a), b = evalConst(n.b); return (a == null || b == null) ? null : Math.pow(a, b); }
+    default: return null;
+  }
+}
+
+function mulOf(nodes) {
+  let n = nodes[0];
+  for (let i = 1; i < nodes.length; i++) n = { t: 'mul', a: n, b: nodes[i] };
+  return n;
+}
+
+/** Peel free numeric factors off an AST → { k, kNodes, rest } (rest null = pure scalar). */
+function peelScalar(node) {
+  const v = evalConst(node);
+  if (v !== null) return { k: v, kNodes: [node], rest: null };
+  if (node.t === 'neg') {
+    const inner = peelScalar(node.a);
+    return {
+      k: -inner.k,
+      kNodes: [{ t: 'num', v: -1 }].concat(inner.kNodes),
+      rest: inner.rest,
+    };
+  }
+  if (node.t === 'mul') {
+    const fs = [];
+    (function flat(n) {
+      if (n.t === 'mul') { flat(n.a); flat(n.b); }
+      else fs.push(n);
+    })(node);
+    let k = 1;
+    const kNodes = [], rest = [];
+    for (const f of fs) {
+      const fv = evalConst(f);
+      if (fv !== null) { k *= fv; kNodes.push(f); }
+      else rest.push(f);
+    }
+    let r = null;
+    if (rest.length) {
+      r = rest[0];
+      for (let i = 1; i < rest.length; i++) r = { t: 'mul', a: r, b: rest[i] };
+    }
+    return { k, kNodes, rest: r };
+  }
+  return { k: 1, kNodes: [], rest: node };
+}
+
+/** Pretty-print K from the peeled factor nodes (keeps forms like 2·10⁴). */
+function formatKHtml(kn, kd) {
+  const K = kn.k / kd.k;
+  const sign = K < 0 ? '−' : '';
+  if (!kd.kNodes.length && kn.kNodes.length) {
+    const pos = (n) => {
+      if (n.t === 'num') return { t: 'num', v: Math.abs(n.v) };
+      if (n.t === 'neg') return pos(n.a);
+      if (n.t === 'mul') return { t: 'mul', a: pos(n.a), b: pos(n.b) };
+      return n;
+    };
+    const nodes = kn.kNodes
+      .filter(n => !(n.t === 'num' && n.v === -1) &&
+        !(n.t === 'neg' && n.a && n.a.t === 'num' && n.a.v === 1))
+      .map(pos);
+    if (nodes.length) return sign + texHtml(nodes.length === 1 ? nodes[0] : mulOf(nodes), 1.5).html;
+  }
+  return sign + texNumHtml(Math.abs(K));
+}
+
 function texPreview(numRaw, denRaw) {
   const num = String(numRaw == null ? '' : numRaw).trim();
   const den = String(denRaw == null ? '' : denRaw).trim();
@@ -1075,6 +1153,25 @@ function texPreview(numRaw, denRaw) {
   try {
     const expr = den ? '(' + (num || '1') + ')/(' + den + ')' : num;
     const ast = parseAst(normalizeInput(expr));
+    if (ast.t === 'div') {
+      const kn = peelScalar(ast.a);
+      const kd = peelScalar(ast.b);
+      const K = kn.k / kd.k;
+      const rn = kn.rest;
+      const rd = kd.rest;
+      const kPrefix = (K === 1) ? '' :
+        ((K === -1) ? '−' : formatKHtml(kn, kd) + '&nbsp;·&nbsp;');
+      if (rd === null) {
+        // pure-scalar denominator: G = K · N′(s), no fraction
+        if (rn === null) return head + (K === 1 ? '1' : (K === -1 ? '−1' : formatKHtml(kn, kd)));
+        if (K === 1) return head + texHtml(rn, 1, { root: true }).html;
+        return head + kPrefix + texHtml(rn, 1, { root: true }).html;
+      }
+      const frac = texHtml(
+        { t: 'div', a: rn || { t: 'num', v: 1 }, b: rd },
+        1, { root: true }).html;
+      return head + kPrefix + frac;
+    }
     return head + texHtml(ast, 1, { root: true }).html;
   } catch (err) {
     return head + '<span class="tex-raw">' +
@@ -1468,14 +1565,21 @@ function selfTest() {
   ok(h.indexOf('10⁻⁴') !== -1, 'tex: 10^-4 superscript', h);
 
   h = texPreview('10*(1+s/10)', 's*(1+s/1000)');
-  ok(h.indexOf('10(1 + <i>s</i>/10)') !== -1, 'tex: numerator juxtaposition', h);
+  ok(h.indexOf('10&nbsp;·&nbsp;') !== -1, 'tex: K beside the fraction', h);
+  ok(h.indexOf('1 + <i>s</i>/10') !== -1, 'tex: numerator factor still present', h);
   ok(h.indexOf('<i>s</i>(1 + <i>s</i>/1000)') !== -1, 'tex: denominator juxtaposition', h);
   ok(h.indexOf('<span class="frac">') !== -1, 'tex: product over product stacks', h);
+  ok(h.indexOf('<span class="fn">1 + <i>s</i>/10</span>') !== -1, 'tex: K peeled out of numerator', h);
 
   h = texPreview('2*10^4', 's^2+1.4*s+100');
-  ok(h.indexOf('2·10⁴') !== -1, 'tex: numeric factors use ·', h);
+  ok(h.indexOf('2·10⁴') !== -1, 'tex: K = 2·10⁴ beside fraction', h);
+  ok(h.indexOf('&nbsp;·&nbsp;<span class="frac">') !== -1, 'tex: K · frac layout', h);
+  ok(h.indexOf('<span class="fn">1</span>') !== -1, 'tex: numerator after peel is 1', h);
   ok(h.indexOf('<i>s</i>²') !== -1, 'tex: s^2 superscript', h);
   ok(h.indexOf('1.4<i>s</i>') !== -1, 'tex: 1.4s juxtaposition', h);
+
+  h = texPreview('1', '1+10^{-4}s');
+  ok(h.indexOf('&nbsp;·&nbsp;') === -1, 'tex: K=1 omitted', h);
 
   h = texPreview('(s+1)*(s+2)', '1');
   ok(h.indexOf('(<i>s</i> + 1)(<i>s</i> + 2)') !== -1, 'tex: additive factors parenthesized', h);
@@ -1508,9 +1612,17 @@ function selfTest() {
   ok(h.indexOf('10⁻⁴') !== -1, 'tex: unicode input renders 10⁻⁴', h);
 
   h = texPreview('10', '1+s');
-  ok(h.indexOf('<span class="fn">10</span>') !== -1 &&
+  ok(h.indexOf('10&nbsp;·&nbsp;') !== -1 &&
+     h.indexOf('<span class="fn">1</span>') !== -1 &&
      h.indexOf('<span class="fd">1 + <i>s</i></span>') !== -1,
-    'tex: fraction parts labelled', h);
+    'tex: K beside fraction parts', h);
+
+  h = texPreview('-2*(1+s)', '1+s');
+  ok(h.indexOf('−2') !== -1, 'tex: negative K keeps unicode minus', h);
+
+  h = texPreview('(s+1)', '2');
+  ok(h.indexOf('frac') === -1 && h.indexOf('0.5') !== -1,
+    'tex: scalar-only denominator collapses to K·N', h);
 
   return { passed, failed: failures.length, failures };
 }
