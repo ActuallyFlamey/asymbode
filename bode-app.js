@@ -364,7 +364,8 @@ function drawPolyline(ctx, pts, g, yr, color, width, dash) {
 }
 
 /** Raw-power ghost for `plot`: dotted preview shown only while hovering that plot.
- *  magnitude → the element's ±20 dB/dec (or ±40) slope from its corner;
+ *  magnitude → the element's ±20 dB/dec (or ±40) slope line through its corner,
+ *               spanning the plot on both sides of the corner;
  *  phase     → the element's phase ramp (0 → ±90°/±180° over corner±1 decade). */
 function ghostPoints(plot) {
   const u = state.user;
@@ -399,9 +400,14 @@ function ghostPoints(plot) {
   if (plot === 'mag') {
     const y0 = BM.asymMag(userForPlot('mag'), xc);
     const slope = BM.magSlopeUnit(elem) * elem.order;
+    // one straight slope line through the corner, spanning the whole plot
     return {
       xc,
-      pts: [{ x: xc, y: y0 }, { x: xmax, y: y0 + slope * (xmax - xc) }],
+      pts: [
+        { x: xmin, y: y0 + slope * (xmin - xc) },
+        { x: xc, y: y0 },
+        { x: xmax, y: y0 + slope * (xmax - xc) },
+      ],
     };
   }
 
