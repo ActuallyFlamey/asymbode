@@ -839,6 +839,10 @@ function fitView() {
   scanMag(userForPlot('mag'));
   scanPh(userForPlot('ph'));
   if (state.showSol) { scanMag(state.tfState); scanPh(state.tfState); }
+  // Nothing placed yet (or only a flat curve) → the fit would collapse to a
+  // zero-height window, sending the placement preview line off the chart.
+  if (ymax - ymin < 40) { const m = (ymin + ymax) / 2; ymin = m - 20; ymax = m + 20; }
+  if (pmax - pmin < 180) { const m = (pmin + pmax) / 2; pmin = m - 90; pmax = m + 90; }
   state.yMag = niceYBounds(isFinite(ymin) ? ymin : -40, isFinite(ymax) ? ymax : 40, false);
   state.yPh = niceYBounds(isFinite(pmin) ? pmin : -225, isFinite(pmax) ? pmax : 225, true);
   setStatus('Fitted view to ω <span class="val">' + fmtW(Math.pow(10, xmin)) + '</span> … <span class="val">' +
