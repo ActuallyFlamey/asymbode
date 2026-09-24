@@ -18,7 +18,8 @@ const state = {
   nextId: 1,
   tf: null,                              // parsed truth TF
   tfState: null,                         // stateFromTF(tf)
-  showSol: false,                        // solution overlay visible (feature 5)
+  showSol: false,                        // solution overlay visible
+  ctrlHeld: false,                       // Ctrl → real (exact) Bode instead of solution asymptote
   drag: null,                            // active pointer gesture (feature 4)
 };
 
@@ -212,12 +213,20 @@ function drawAxes(ctx, w, h, yr, opts) {
 // ---------------------------------------------------------------------------
 function drawPolyline(ctx, pts, g, yr, color, width, dash) {
   if (!pts || pts.length < 2) return;
+  const span = yr.max - yr.min;
+  const lo = yr.min - span, hi = yr.max + span;
+  const prepped = [];
+  for (const p of pts) {
+    if (!isFinite(p.x) || !isFinite(p.y)) continue;
+    prepped.push({ x: p.x, y: clamp(p.y, lo, hi) });
+  }
+  if (prepped.length < 2) return;
   ctx.save();
   ctx.beginPath();
   ctx.rect(g.l, g.t, g.w, g.h);
   ctx.clip();
   ctx.beginPath();
-  pts.forEach((p, i) => {
+  prepped.forEach((p, i) => {
     const px = xToPx(p.x, g), py = yToPx(p.y, g, yr);
     if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
   });
@@ -404,6 +413,21 @@ function render() {
   const ppts = BM.asymPhasePoints(state.user, state.view.xmin, state.view.xmax);
   drawPolyline(magCtx, mpts, gy, state.yMag, DARK.user, 2.2);
   drawPolyline(phCtx, ppts, gp, state.yPh, DARK.user, 2.2);
+
+  // solution overlay: dashed asymptote, or the real Bode plot while Ctrl is held
+  if (state.showSol && state.tf && state.tfState) {
+    if (state.ctrlHeld) {
+      const pts = BM.exactCurve(state.tf, state.view.xmin, state.view.xmax, 400,
+        BM.asymPhase(state.tfState, state.view.xmin));
+      drawPolyline(magCtx, pts.map(p => ({ x: p.x, y: p.db })), gy, state.yMag, DARK.exact, 1.8);
+      drawPolyline(phCtx, pts.map(p => ({ x: p.x, y: p.ph })), gp, state.yPh, DARK.exact, 1.8);
+    } else {
+      const smp = BM.asymMagPoints(state.tfState, state.view.xmin, state.view.xmax);
+      const spp = BM.asymPhasePoints(state.tfState, state.view.xmin, state.view.xmax);
+      drawPolyline(magCtx, smp, gy, state.yMag, DARK.sol, 1.8, [6, 4]);
+      drawPolyline(phCtx, spp, gp, state.yPh, DARK.sol, 1.8, [6, 4]);
+    }
+  }
 
   // raw-power ghost (dotted)
   const gh = ghostPoints();
@@ -818,8 +842,11 @@ function loadTF() {
     state.tf = tf;
     state.tfState = BM.stateFromTF(tf);
     state.showSol = false;
+    state.ctrlHeld = false;
     if (els.lgSolution) els.lgSolution.hidden = true;
     if (els.lgExact) els.lgExact.hidden = true;
+    if (els.checkResults)
+      els.checkResults.innerHTML = '<div class="empty-hint">Load a transfer function, draw your asymptote, then press <b>Show solution &amp; Check</b>.</div>';
     showMsg(els.tfOk, 'G(s) loaded — ' + tfSummary(tf), true);
     showMsg(els.tfError, '', false);
     setStatus('Transfer function loaded — place poles &amp; zeros to match its Bode plot, then <b>Show solution &amp; Check</b>');
@@ -941,11 +968,73 @@ function updateSidebar() {
 }
 
 // ---------------------------------------------------------------------------
+// solution overlay + check
+// ---------------------------------------------------------------------------
+function updateLegend() {
+  if (els.lgSolution) els.lgSolution.hidden = !(state.showSol && !state.ctrlHeld);
+  if (els.lgExact) els.lgExact.hidden = !(state.showSol && state.ctrlHeld);
+}
+
+function setCtrlHeld(v) {
+  if (state.ctrlHeld === v) return;
+  state.ctrlHeld = v;
+  updateLegend();
+  if (state.showSol) {
+    setStatus(v
+      ? 'Real Bode plot (exact G(jω)) — release <b>Ctrl</b> for the asymptotic solution'
+      : 'Asymptotic solution shown — hold <b>Ctrl</b> for the real Bode plot');
+    render();
+  }
+}
+
+function renderCheck(res) {
+  const box = els.checkResults;
+  box.innerHTML = '';
+  const allOk = res.score.ok === res.score.total;
+  const score = document.createElement('div');
+  score.className = 'check-score ' + (allOk ? 'good' : 'bad');
+  score.textContent = res.score.ok + ' / ' + res.score.total + ' correct' + (allOk ? ' — perfect!' : '');
+  box.appendChild(score);
+  for (const it of res.items) {
+    const row = document.createElement('div');
+    row.className = 'check-item ' + (it.ok ? 'ok' : 'fail');
+    const mark = document.createElement('span');
+    mark.className = 'mark';
+    mark.textContent = it.ok ? '✓' : '✗';
+    const txt = document.createElement('span');
+    txt.textContent = it.text;
+    row.append(mark, txt);
+    box.appendChild(row);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'ctrl-hint';
+  hint.innerHTML = 'hold <kbd>Ctrl</kbd> to see the real Bode plot';
+  box.appendChild(hint);
+}
+
+function showSolutionAndCheck() {
+  if (!state.tf) {
+    setStatus('Load a transfer function first — enter G(s) above and press <b>Load</b>');
+    return;
+  }
+  const res = BM.checkSolution(state.tf, state.user);
+  state.showSol = true;
+  renderCheck(res);
+  updateLegend();
+  setStatus('Solution shown — score <b>' + res.score.ok + '/' + res.score.total + '</b>' +
+    (res.score.ok === res.score.total ? ' — perfect!' : '') +
+    ' · hold <b>Ctrl</b> for the real Bode plot · <b>F</b> fits the view');
+  render();
+  return res;
+}
+
+// ---------------------------------------------------------------------------
 // keyboard
 // ---------------------------------------------------------------------------
 function onKeyDown(e) {
   const tag = (e.target && e.target.tagName) || '';
   if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+  if (e.key === 'Control') { setCtrlHeld(true); return; }
   const k = e.key.toLowerCase();
   if (k === 'v') setTool('select');
   else if (k === 'z') setTool('zero');
@@ -957,6 +1046,10 @@ function onKeyDown(e) {
   else if (k === 'delete' || k === 'backspace') { e.preventDefault(); removeSelected(); }
   else if (k === 'f') fitView();
   else return;
+}
+
+function onKeyUp(e) {
+  if (e.key === 'Control') setCtrlHeld(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -990,6 +1083,7 @@ function init() {
 
   document.getElementById('btnClear').addEventListener('click', clearUser);
   document.getElementById('btnFit').addEventListener('click', fitView);
+  document.getElementById('btnCheck').addEventListener('click', showSolutionAndCheck);
 
   document.getElementById('z0Plus').addEventListener('click', () => {
     state.user.z0 = clamp(state.user.z0 + 1, 0, 8);
@@ -1036,6 +1130,8 @@ function init() {
   bindWheel(els.magCanvas, 'mag');
   bindWheel(els.phCanvas, 'ph');
   document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', () => setCtrlHeld(false));
 
   const ro = new ResizeObserver(() => resizeAll());
   ro.observe(els.magCanvas.parentElement);
@@ -1048,6 +1144,7 @@ function init() {
 window.__bode = {
   state, setTool, render, resizeAll, setStatus,
   loadTF, placeAt, removeElem, clearUser, updateSidebar, fitView,
+  showSolutionAndCheck, setCtrlHeld, updateLegend,
   helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem },
 };
 
