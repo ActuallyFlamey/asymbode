@@ -884,6 +884,152 @@ const SUPMAP = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '
 function sup(n) { return String(n).split('').map(c => SUPMAP[c] || c).join(''); }
 
 // ===========================================================================
+// TeX-style HTML rendering of a transfer function (for the G(s) preview)
+// ===========================================================================
+
+function texEscapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function texSupHtml(e) {
+  return '<sup>' + (e < 0 ? '−' + Math.abs(e) : String(e)) + '</sup>';
+}
+
+function texNumHtml(v) {
+  if (!isFinite(v)) return texEscapeHtml(String(v));
+  if (v === 0) return '0';
+  const a = Math.abs(v);
+  if (Number.isInteger(v) && a < 1e15) return String(v);
+  const e = Math.floor(Math.log10(a));
+  const isPow10 = Math.abs(a - Math.pow(10, e)) <= 1e-9 * a &&
+    Math.abs(Math.log10(a) - e) < 1e-9;
+  if (isPow10 && Math.abs(e) >= 3) return '10' + texSupHtml(e);
+  if (a >= 1e15 || a < 1e-4) {
+    const m = Number((v / Math.pow(10, e)).toPrecision(6));
+    return String(m) + '·10' + texSupHtml(e);
+  }
+  return String(Number(v.toPrecision(10)));
+}
+
+function texPrec(n) {
+  switch (n.t) {
+    case 'add': case 'sub': return 1;
+    case 'neg': return 1.5;
+    case 'mul': case 'div': return 2;
+    case 'pow': return 4;
+    default: return 5; // num, s
+  }
+}
+
+function texHasAddSub(n) {
+  if (!n) return false;
+  if (n.t === 'add' || n.t === 'sub') return true;
+  if (n.t === 'neg') return texHasAddSub(n.a);
+  return false;
+}
+
+function texStripTags(html) { return html.replace(/<[^>]*>/g, ''); }
+
+/** Render mul factors: flatten, numeric factors first, · only where needed. */
+function texMulHtml(node) {
+  const factors = [];
+  (function flatten(n) {
+    if (n.t === 'mul') { flatten(n.a); flatten(n.b); }
+    else factors.push(n);
+  })(node);
+
+  const rendered = factors.map((n, i) => texHtml(n, i === 0 ? 1.5 : 3));
+  const nums = [], others = [];
+  for (const r of rendered) ((r.html.indexOf('<i>') === -1) ? nums : others).push(r);
+  const parts = nums.concat(others);
+
+  let out = '';
+  for (let i = 0; i < parts.length; i++) {
+    if (i > 0) {
+      const L = texStripTags(parts[i - 1].html), R = texStripTags(parts[i].html);
+      const bothNum = parts[i - 1].numeric && parts[i].numeric;
+      const letterRun = /[A-Za-z]$/.test(L) && /^[A-Za-z0-9]/.test(R);
+      out += (bothNum || letterRun) ? '·' : '';
+    }
+    out += parts[i].html;
+  }
+  return { html: out, numeric: others.length === 0 };
+}
+
+/**
+ * Render AST node as TeX-document-style HTML.
+ * minPrec: parenthesise when the node binds looser than this precedence.
+ * opts.root: top level of G(s) → a division becomes a stacked fraction.
+ */
+function texHtml(node, minPrec, opts) {
+  opts = opts || {};
+  const wrap = (html, prec) => (prec < minPrec ? '(' + html + ')' : html);
+  switch (node.t) {
+    case 'num':
+      return { html: wrap(texNumHtml(node.v), 5), numeric: true };
+    case 's':
+      return { html: wrap('<i>s</i>', 5), numeric: false };
+    case 'neg': {
+      const inner = texHtml(node.a, 1.5);
+      return { html: wrap('−' + inner.html, 1.5), numeric: inner.numeric };
+    }
+    case 'add': case 'sub': {
+      const a = texHtml(node.a, 1);
+      const b = texHtml(node.b, node.t === 'sub' ? 2 : 1);
+      return { html: wrap(a.html + (node.t === 'add' ? ' + ' : ' − ') + b.html, 1), numeric: false };
+    }
+    case 'mul': {
+      const m = texMulHtml(node);
+      return { html: wrap(m.html, 2), numeric: m.numeric };
+    }
+    case 'div': {
+      const stack = !!opts.root || texHasAddSub(node.a) || texHasAddSub(node.b);
+      if (stack) {
+        const a = texHtml(node.a, 1), b = texHtml(node.b, 1);
+        return {
+          html: '<span class="frac"><span class="fn">' + a.html +
+            '</span><span class="fd">' + b.html + '</span></span>',
+          numeric: false,
+        };
+      }
+      const a = texHtml(node.a, 2), b = texHtml(node.b, 3);
+      return { html: wrap(a.html + '/' + b.html, 2), numeric: false };
+    }
+    case 'pow': {
+      const base = texHtml(node.a, 5);
+      const exp = texHtml(node.b, 1.5);
+      return {
+        html: wrap(base.html + '<sup>' + exp.html + '</sup>', 4),
+        numeric: base.numeric && exp.numeric,
+      };
+    }
+    default:
+      return { html: texEscapeHtml('?'), numeric: false };
+  }
+}
+
+/**
+ * Build the live G(s) preview HTML from separate numerator/denominator field
+ * text. Never throws: unparseable input falls back to the raw text.
+ */
+function texPreview(numRaw, denRaw) {
+  const num = String(numRaw == null ? '' : numRaw).trim();
+  const den = String(denRaw == null ? '' : denRaw).trim();
+  const head = '<i>G</i>(<i>s</i>)&nbsp;=&nbsp;';
+  if (!num && !den) return head + '<span class="tex-ph">?</span>';
+  try {
+    const expr = den ? '(' + (num || '1') + ')/(' + den + ')' : num;
+    const ast = parseAst(normalizeInput(expr));
+    return head + texHtml(ast, 1, { root: true }).html;
+  } catch (err) {
+    return head + '<span class="tex-raw">' +
+      texEscapeHtml(num || '1') + ' / ' + texEscapeHtml(den || '1') + '</span>';
+  }
+}
+
+// ===========================================================================
 // Self-tests
 // ===========================================================================
 
@@ -1231,6 +1377,51 @@ function selfTest() {
   near(Math.log10(1000), 3, 1e-12, 'log10 sanity');
   ok(fmtW(1e4).indexOf('10') === 0, 'fmtW uses power form', fmtW(1e4));
 
+  // ---- TeX preview rendering ----
+  let h = texPreview('1', '1+10^{-4}s');
+  ok(h.indexOf('<i>G</i>(<i>s</i>)') === 0, 'tex: G(s) head', h);
+  ok(h.indexOf('<span class="frac">') !== -1, 'tex: stacked fraction', h);
+  ok(h.indexOf('<i>s</i>') !== -1, 'tex: italic s', h);
+  ok(h.indexOf('10<sup>−4</sup>') !== -1, 'tex: 10^-4 superscript', h);
+
+  h = texPreview('10*(1+s/10)', 's*(1+s/1000)');
+  ok(h.indexOf('10(1 + <i>s</i>/10)') !== -1, 'tex: numerator juxtaposition', h);
+  ok(h.indexOf('<i>s</i>(1 + <i>s</i>/1000)') !== -1, 'tex: denominator juxtaposition', h);
+  ok(h.indexOf('<span class="frac">') !== -1, 'tex: product over product stacks', h);
+
+  h = texPreview('2*10^4', 's^2+1.4*s+100');
+  ok(h.indexOf('2·10<sup>4</sup>') !== -1, 'tex: numeric factors use ·', h);
+  ok(h.indexOf('<i>s</i><sup>2</sup>') !== -1, 'tex: s^2 superscript', h);
+  ok(h.indexOf('1.4<i>s</i>') !== -1, 'tex: 1.4s juxtaposition', h);
+
+  h = texPreview('(s+1)*(s+2)', '1');
+  ok(h.indexOf('(<i>s</i> + 1)(<i>s</i> + 2)') !== -1, 'tex: additive factors parenthesized', h);
+
+  h = texPreview('s', 's+1');
+  ok(h.indexOf('<span class="fn"><i>s</i></span>') !== -1, 'tex: root always stacks', h);
+  ok(h.indexOf('<span class="fd"><i>s</i> + 1</span>') !== -1, 'tex: denominator add inline', h);
+
+  h = texPreview('1+s', '');
+  ok(h.indexOf('frac') === -1, 'tex: no fraction when denominator empty', h);
+  ok(h.indexOf('1 + <i>s</i>') !== -1, 'tex: inline add when no denominator', h);
+
+  h = texPreview('\\frac{1}{1+s}', '');
+  ok(h.indexOf('<span class="frac">') !== -1, 'tex: LaTeX \\frac inside a field', h);
+
+  h = texPreview('bad(((', '1+s');
+  ok(h.indexOf('tex-raw') !== -1, 'tex: fallback on parse error', h);
+
+  h = texPreview('<img>', '');
+  ok(h.indexOf('&lt;img&gt;') !== -1, 'tex: fallback escapes HTML', h);
+
+  h = texPreview('', '');
+  ok(h.indexOf('tex-ph') !== -1, 'tex: placeholder when empty', h);
+
+  h = texPreview('10', '1+s');
+  ok(h.indexOf('<span class="fn">10</span>') !== -1 &&
+     h.indexOf('<span class="fd">1 + <i>s</i></span>') !== -1,
+    'tex: fraction parts labelled', h);
+
   return { passed, failed: failures.length, failures };
 }
 
@@ -1247,6 +1438,7 @@ const BodeMath = {
   stateFromTF, checkSolution,
   freqOf, cornerX, magSlopeUnit, phaseTotal,
   polyTrim, polyMul, polyAdd, rootsOf,
+  texPreview,
   selfTest,
 };
 

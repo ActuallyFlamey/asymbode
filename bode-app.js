@@ -939,6 +939,19 @@ function showMsg(el, text, show) {
   else { el.hidden = true; el.textContent = ''; }
 }
 
+/** Raw combined expression from the numerator/denominator fields. */
+function tfRawExpr() {
+  const num = (els.numInput ? els.numInput.value : '').trim();
+  const den = (els.denInput ? els.denInput.value : '').trim();
+  if (!den) return num;
+  return '(' + (num || '1') + ')/(' + den + ')';
+}
+
+function updateTfPreview() {
+  if (!els.tfRender || !els.numInput || !els.denInput) return;
+  els.tfRender.innerHTML = BM.texPreview(els.numInput.value, els.denInput.value);
+}
+
 function tfSummary(tf) {
   const parts = [];
   parts.push('K = ' + fmtNum(tf.gain));
@@ -952,7 +965,7 @@ function tfSummary(tf) {
 }
 
 function loadTF() {
-  const raw = els.tfInput.value;
+  const raw = tfRawExpr();
   try {
     const tf = BM.parseTransferFunction(raw);
     state.tf = tf;
@@ -1133,7 +1146,7 @@ function renderCheck(res) {
 
 function showSolutionAndCheck() {
   if (!state.tf) {
-    setStatus('Load a transfer function first — enter G(s) above and press <b>Load</b>');
+    setStatus('Load a transfer function first — enter the numerator &amp; denominator in the sidebar and press <b>Load</b>');
     return;
   }
   const res = BM.checkSolution(state.tf, state.user);
@@ -1175,7 +1188,7 @@ function composeExport() {
   const brandW = c.measureText('asymbode').width;
   c.fillStyle = '#d7dee9';
   c.font = Math.round(13 * dpr) + 'px ui-monospace, monospace';
-  const expr = 'G(s) = ' + (els.tfInput.value || '—');
+  const expr = 'G(s) = ' + (tfRawExpr() || '—');
   c.fillText(expr, pad + brandW + 16 * dpr, headH * 0.42);
   c.fillStyle = '#8b98ab';
   c.font = Math.round(11 * dpr) + 'px system-ui, sans-serif';
@@ -1265,7 +1278,9 @@ function init() {
   els.magCanvas = document.getElementById('magCanvas');
   els.phCanvas = document.getElementById('phCanvas');
   els.status = document.getElementById('status');
-  els.tfInput = document.getElementById('tfInput');
+  els.numInput = document.getElementById('numInput');
+  els.denInput = document.getElementById('denInput');
+  els.tfRender = document.getElementById('tfRender');
   els.tfError = document.getElementById('tfError');
   els.tfOk = document.getElementById('tfOk');
   els.elemList = document.getElementById('elemList');
@@ -1287,7 +1302,11 @@ function init() {
   });
 
   document.getElementById('btnLoad').addEventListener('click', loadTF);
-  els.tfInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadTF(); });
+  for (const inp of [els.numInput, els.denInput]) {
+    inp.addEventListener('input', updateTfPreview);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadTF(); });
+  }
+  updateTfPreview();
 
   document.getElementById('btnClear').addEventListener('click', clearUser);
   document.getElementById('btnFit').addEventListener('click', fitView);
@@ -1363,6 +1382,7 @@ window.__bode = {
   showSolutionAndCheck, setCtrlHeld, updateLegend,
   composeExport, exportPng, copyImage, ghostPoints,
   undo, redo, recordHistory, resetHistory,
+  updateTfPreview, tfRawExpr,
   helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem },
 };
 

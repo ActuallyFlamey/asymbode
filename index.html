@@ -11,12 +11,6 @@
 <header class="toolbar">
   <div class="brand" title="Asymptotic Bode diagram trainer">asymbode</div>
 
-  <label class="tf-label" title="Transfer function in poles-and-zeros form">G(s)&nbsp;=
-    <input id="tfInput" type="text" spellcheck="false" autocomplete="off"
-           placeholder="\frac{1}{1+10^{-4}s}" value="1/(1+10^{-4}s)">
-  </label>
-  <button id="btnLoad" class="btn primary" title="Parse the transfer function and start an exercise (Enter)">Load</button>
-
   <span class="sep"></span>
 
   <div class="tools" role="radiogroup" aria-label="Tools">
@@ -102,7 +96,20 @@
     </section>
 
     <section class="panel">
-      <h3>Gain</h3>
+      <h3>Transfer function</h3>
+      <div class="tf-render" id="tfRender" title="G(s) as it would appear in a rendered TeX document — updates as you type"></div>
+      <div class="tf-edit">
+        <input id="numInput" class="tf-part" type="text" spellcheck="false" autocomplete="off"
+               placeholder="numerator" aria-label="Numerator of G(s)" value="1">
+        <div class="tf-bar" aria-hidden="true"></div>
+        <input id="denInput" class="tf-part" type="text" spellcheck="false" autocomplete="off"
+               placeholder="denominator" aria-label="Denominator of G(s)" value="1+10^{-4}s">
+      </div>
+      <div class="tf-actions">
+        <button id="btnLoad" class="btn primary" title="Parse the transfer function and start an exercise (Enter)">Load</button>
+        <span class="tf-hint">numerator over denominator · <kbd>Enter</kbd> to load</span>
+      </div>
+      <div class="tf-sep"></div>
       <div class="gain-row">
         <label for="gainInput">20&nbsp;lg|K|</label>
         <input id="gainInput" type="number" step="0.1" value="0" min="-200" max="200">
@@ -122,7 +129,7 @@
     <section class="panel help">
       <h3>Help</h3>
       <ul>
-        <li>Accepts e.g. <code>\frac{1}{1+10^{-4}s}</code>, <code>10*(1+s/10)/(s*(1+s/1000))</code>, <code>2*10^4/(s^2+1.4*s+100)</code></li>
+        <li>Numerator &amp; denominator fields (sidebar) accept e.g. <code>1</code> over <code>1+10^{-4}s</code>, <code>10*(1+s/10)</code> over <code>s*(1+s/1000)</code>, or LaTeX like <code>\frac{1}{1+s}</code> in either field</li>
         <li>Click on a plot with a Zero/Pole tool to place; click again on the same spot to increase its order (×2 → +40&nbsp;dB/dec…)</li>
         <li><b>Shift + hover</b> a marker (or just hover while placing) shows its raw power as a dotted line on the plot you're hovering — hidden when the pointer leaves the plot</li>
         <li><b>Drag the line</b> vertically → gain · <b>drag a marker</b> → corner frequency · background drag pans · wheel zooms ω</li>
