@@ -1029,6 +1029,87 @@ function showSolutionAndCheck() {
 }
 
 // ---------------------------------------------------------------------------
+// export: composed PNG (header + mag + phase) — download or clipboard (AFFiNE)
+// ---------------------------------------------------------------------------
+function composeExport() {
+  const dpr = window.devicePixelRatio || 1;
+  const pad = Math.round(14 * dpr);
+  const gap = Math.round(10 * dpr);
+  const headH = Math.round(46 * dpr);
+  const mw = els.magCanvas.width, mh = els.magCanvas.height;
+  const pw = els.phCanvas.width, ph = els.phCanvas.height;
+  const w = Math.max(mw, pw);
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = headH + mh + gap + ph + pad;
+  const c = out.getContext('2d');
+
+  c.fillStyle = '#11161d';
+  c.fillRect(0, 0, out.width, out.height);
+
+  // header
+  c.textBaseline = 'middle';
+  c.textAlign = 'left';
+  c.fillStyle = '#4fc3f7';
+  c.font = '700 ' + Math.round(16 * dpr) + 'px system-ui, sans-serif';
+  c.fillText('asymbode', pad, headH * 0.42);
+  const brandW = c.measureText('asymbode').width;
+  c.fillStyle = '#d7dee9';
+  c.font = Math.round(13 * dpr) + 'px ui-monospace, monospace';
+  const expr = 'G(s) = ' + (els.tfInput.value || '—');
+  c.fillText(expr, pad + brandW + 16 * dpr, headH * 0.42);
+  c.fillStyle = '#8b98ab';
+  c.font = Math.round(11 * dpr) + 'px system-ui, sans-serif';
+  c.textAlign = 'right';
+  c.fillText(new Date().toISOString().slice(0, 10), w - pad, headH * 0.42);
+  c.textAlign = 'left';
+  c.strokeStyle = '#263042';
+  c.lineWidth = Math.max(1, dpr);
+  c.beginPath();
+  c.moveTo(pad, headH - 6 * dpr);
+  c.lineTo(w - pad, headH - 6 * dpr);
+  c.stroke();
+
+  c.drawImage(els.magCanvas, 0, headH, mw, mh);
+  c.drawImage(els.phCanvas, 0, headH + mh + gap, pw, ph);
+
+  c.strokeStyle = '#263042';
+  c.strokeRect(0.5, 0.5, out.width - 1, out.height - 1);
+  return out;
+}
+
+function exportPng() {
+  const out = composeExport();
+  out.toBlob((blob) => {
+    if (!blob) { setStatus('PNG export failed'); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'bode-diagram-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setStatus('Downloaded <b>' + a.download + '</b>');
+  }, 'image/png');
+}
+
+function copyImage() {
+  const doCopy = async () => {
+    const out = composeExport();
+    const blob = await new Promise((resolve, reject) =>
+      out.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png'));
+    if (!navigator.clipboard || typeof ClipboardItem === 'undefined')
+      throw new Error('clipboard images unsupported here');
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    setStatus('Image copied to clipboard — paste straight into AFFiNE (Ctrl/Cmd+V)');
+  };
+  doCopy().catch(err => {
+    setStatus('Copy failed (' + err.message + ') — use <b>Export PNG</b> instead');
+  });
+}
+
+// ---------------------------------------------------------------------------
 // keyboard
 // ---------------------------------------------------------------------------
 function onKeyDown(e) {
@@ -1084,6 +1165,8 @@ function init() {
   document.getElementById('btnClear').addEventListener('click', clearUser);
   document.getElementById('btnFit').addEventListener('click', fitView);
   document.getElementById('btnCheck').addEventListener('click', showSolutionAndCheck);
+  document.getElementById('btnExportPng').addEventListener('click', exportPng);
+  document.getElementById('btnCopyImg').addEventListener('click', copyImage);
 
   document.getElementById('z0Plus').addEventListener('click', () => {
     state.user.z0 = clamp(state.user.z0 + 1, 0, 8);
@@ -1145,6 +1228,7 @@ window.__bode = {
   state, setTool, render, resizeAll, setStatus,
   loadTF, placeAt, removeElem, clearUser, updateSidebar, fitView,
   showSolutionAndCheck, setCtrlHeld, updateLegend,
+  composeExport, exportPng, copyImage,
   helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem },
 };
 
