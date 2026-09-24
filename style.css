@@ -156,8 +156,37 @@ body {
 .tex-ph { color: var(--muted); font-style: italic; }
 .tex-raw { font-family: var(--mono); font-size: 12.5px; color: var(--amber); }
 
-.tf-edit { display: flex; flex-direction: column; margin: 9px 0 7px; }
-.tf-edit .tf-part {
+.tf-edit {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  margin: 9px 0 7px;
+  align-items: stretch;
+}
+.tf-k {
+  width: 46px;
+  padding: 5px 4px;
+  background: var(--panel2);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  text-align: center;
+}
+.tf-k::placeholder { color: var(--muted); }
+.tf-k:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.tf-nd {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tf-nd .tf-part {
   width: 100%;
   padding: 5px 8px;
   background: var(--panel2);
@@ -166,9 +195,9 @@ body {
   font-family: var(--mono);
   font-size: 13px;
 }
-.tf-edit .tf-part:first-child { border-radius: 6px 6px 0 0; border-bottom: none; }
-.tf-edit .tf-part:last-child { border-radius: 0 0 6px 6px; border-top: none; }
-.tf-edit .tf-part:focus {
+.tf-nd .tf-part:first-child { border-radius: 6px 6px 0 0; border-bottom: none; }
+.tf-nd .tf-part:last-child { border-radius: 0 0 6px 6px; border-top: none; }
+.tf-nd .tf-part:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
@@ -191,7 +220,25 @@ body {
   font-family: var(--mono);
   font-size: 10px;
 }
-.tf-sep { height: 1px; background: var(--border); margin: 10px 0 6px; }
+.user-gain {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+.user-gain-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.user-gain-sub {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+}
 
 /* ---------- workspace ---------- */
 .workspace {

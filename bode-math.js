@@ -1064,11 +1064,11 @@ function texHtml(node, minPrec, opts) {
 }
 
 /**
- * Build the live G(s) preview HTML from separate numerator/denominator field
+ * Build the live G(s) preview HTML from K / numerator / denominator field
  * text. Never throws: unparseable input falls back to the raw text.
  *
- * Numeric scalar factors are peeled out of N/D and rendered beside the
- * fraction as K:  G(s) = K · N′(s)/D′(s)  (LaTeX-style).
+ * Numeric scalar factors (from the K field and from N/D) are peeled out and
+ * rendered beside the fraction:  G(s) = K · N′(s)/D′(s).
  */
 function evalConst(n) {
   switch (n && n.t) {
@@ -1145,37 +1145,90 @@ function formatKHtml(kn, kd) {
   return sign + texNumHtml(Math.abs(K));
 }
 
-function texPreview(numRaw, denRaw) {
+/** Raw expression from K / num / den fields (K folded in only when ≠ 1). */
+function tfExpr(kRaw, numRaw, denRaw) {
+  const k = String(kRaw == null ? '' : kRaw).trim() || '1';
+  const num = String(numRaw == null ? '' : numRaw).trim();
+  const den = String(denRaw == null ? '' : denRaw).trim();
+  if (!num && !den && k === '1') return '';
+  const kPart = k === '1' ? '' : '(' + k + ')*';
+  if (!den) {
+    if (!num) return k === '1' ? '' : k;
+    return k === '1' ? num : kPart + '(' + num + ')';
+  }
+  return kPart + '(' + (num || '1') + ')/(' + den + ')';
+}
+
+/** Pretty prefix for a standalone K-field value: "10 · ", "2·10⁴ · ", … */
+function kPrefixHtml(k) {
+  try {
+    const kAst = parseAst(normalizeInput(k));
+    const kv = evalConst(kAst);
+    if (kv != null) {
+      const sign = kv < 0 ? '−' : '';
+      const nodes = [];
+      (function flat(n) {
+        if (n.t === 'mul') { flat(n.a); flat(n.b); }
+        else if (n.t === 'neg') { const a = n.a; if (a && a.t === 'num') return; flat(a); }
+        else nodes.push(n);
+      })(kAst);
+      const abs = nodes.map((n) => {
+        if (n.t === 'num') return { t: 'num', v: Math.abs(n.v) };
+        return n;
+      });
+      const body = abs.length
+        ? texHtml(abs.length === 1 ? abs[0] : mulOf(abs), 1.5, { root: true }).html
+        : texNumHtml(Math.abs(kv));
+      return sign + body + '&nbsp;·&nbsp;';
+    }
+    return texHtml(kAst, 1.5, { root: true }).html + '&nbsp;·&nbsp;';
+  } catch (e) {
+    return texEscapeHtml(k) + '&nbsp;·&nbsp;';
+  }
+}
+
+function texPreview(kRaw, numRaw, denRaw) {
+  const k = String(kRaw == null ? '' : kRaw).trim() || '1';
   const num = String(numRaw == null ? '' : numRaw).trim();
   const den = String(denRaw == null ? '' : denRaw).trim();
   const head = '<i>G</i>(<i>s</i>)&nbsp;=&nbsp;';
-  if (!num && !den) return head + '<span class="tex-ph">?</span>';
+  if (!num && !den && k === '1') return head + '<span class="tex-ph">?</span>';
+  const kHtml = (k === '1') ? '' : kPrefixHtml(k);
+  const body = num || den ? (den ? '(' + (num || '1') + ')/(' + den + ')' : num) : '1';
   try {
-    const expr = den ? '(' + (num || '1') + ')/(' + den + ')' : num;
-    const ast = parseAst(normalizeInput(expr));
+    const ast = parseAst(normalizeInput(body));
     if (ast.t === 'div') {
       const kn = peelScalar(ast.a);
       const kd = peelScalar(ast.b);
       const K = kn.k / kd.k;
       const rn = kn.rest;
       const rd = kd.rest;
-      const kPrefix = (K === 1) ? '' :
+      const peelPrefix = (K === 1) ? '' :
         ((K === -1) ? '−' : formatKHtml(kn, kd) + '&nbsp;·&nbsp;');
       if (rd === null) {
         // pure-scalar denominator: G = K · N′(s), no fraction
-        if (rn === null) return head + (K === 1 ? '1' : (K === -1 ? '−1' : formatKHtml(kn, kd)));
-        if (K === 1) return head + texHtml(rn, 1, { root: true }).html;
-        return head + kPrefix + texHtml(rn, 1, { root: true }).html;
+        const peeled = (rn === null)
+          ? (K === 1 ? '1' : (K === -1 ? '−1' : formatKHtml(kn, kd)))
+          : (K === 1
+            ? texHtml(rn, 1, { root: true }).html
+            : peelPrefix + texHtml(rn, 1, { root: true }).html);
+        return head + kHtml + peeled;
       }
       const frac = texHtml(
         { t: 'div', a: rn || { t: 'num', v: 1 }, b: rd },
         1, { root: true }).html;
-      return head + kPrefix + frac;
+      return head + kHtml + peelPrefix + frac;
     }
-    return head + texHtml(ast, 1, { root: true }).html;
+    // K multiplies a top-level sum: parenthesize so 5·(1+s) ≠ 5·1+s
+    let rhs = texHtml(ast, 1, { root: true }).html;
+    if (kHtml && (ast.t === 'add' || ast.t === 'sub')) {
+      rhs = '(' + rhs + ')';
+    }
+    return head + kHtml + rhs;
   } catch (err) {
-    return head + '<span class="tex-raw">' +
-      texEscapeHtml(num || '1') + ' / ' + texEscapeHtml(den || '1') + '</span>';
+    return head + kHtml + '<span class="tex-raw">' +
+      texEscapeHtml(num || '1') +
+      (den ? ' / ' + texEscapeHtml(den) : '') + '</span>';
   }
 }
 
@@ -1557,72 +1610,84 @@ function selfTest() {
   near(Math.log10(1000), 3, 1e-12, 'log10 sanity');
   ok(fmtW(1e4).indexOf('10') === 0, 'fmtW uses power form', fmtW(1e4));
 
-  // ---- TeX preview rendering ----
-  let h = texPreview('1', '1+10^{-4}s');
+  // ---- TeX preview rendering (k, num, den) ----
+  let h = texPreview('1', '1', '1+10^{-4}s');
   ok(h.indexOf('<i>G</i>(<i>s</i>)') === 0, 'tex: G(s) head', h);
   ok(h.indexOf('<span class="frac">') !== -1, 'tex: stacked fraction', h);
   ok(h.indexOf('<i>s</i>') !== -1, 'tex: italic s', h);
   ok(h.indexOf('10⁻⁴') !== -1, 'tex: 10^-4 superscript', h);
 
-  h = texPreview('10*(1+s/10)', 's*(1+s/1000)');
+  h = texPreview('1', '10*(1+s/10)', 's*(1+s/1000)');
   ok(h.indexOf('10&nbsp;·&nbsp;') !== -1, 'tex: K beside the fraction', h);
   ok(h.indexOf('1 + <i>s</i>/10') !== -1, 'tex: numerator factor still present', h);
   ok(h.indexOf('<i>s</i>(1 + <i>s</i>/1000)') !== -1, 'tex: denominator juxtaposition', h);
   ok(h.indexOf('<span class="frac">') !== -1, 'tex: product over product stacks', h);
   ok(h.indexOf('<span class="fn">1 + <i>s</i>/10</span>') !== -1, 'tex: K peeled out of numerator', h);
 
-  h = texPreview('2*10^4', 's^2+1.4*s+100');
+  h = texPreview('1', '2*10^4', 's^2+1.4*s+100');
   ok(h.indexOf('2·10⁴') !== -1, 'tex: K = 2·10⁴ beside fraction', h);
   ok(h.indexOf('&nbsp;·&nbsp;<span class="frac">') !== -1, 'tex: K · frac layout', h);
   ok(h.indexOf('<span class="fn">1</span>') !== -1, 'tex: numerator after peel is 1', h);
   ok(h.indexOf('<i>s</i>²') !== -1, 'tex: s^2 superscript', h);
   ok(h.indexOf('1.4<i>s</i>') !== -1, 'tex: 1.4s juxtaposition', h);
 
-  h = texPreview('1', '1+10^{-4}s');
+  h = texPreview('1', '1', '1+10^{-4}s');
   ok(h.indexOf('&nbsp;·&nbsp;') === -1, 'tex: K=1 omitted', h);
 
-  h = texPreview('(s+1)*(s+2)', '1');
+  h = texPreview('1', '(s+1)*(s+2)', '1');
   ok(h.indexOf('(<i>s</i> + 1)(<i>s</i> + 2)') !== -1, 'tex: additive factors parenthesized', h);
 
-  h = texPreview('s', 's+1');
+  h = texPreview('1', 's', 's+1');
   ok(h.indexOf('<span class="fn"><i>s</i></span>') !== -1, 'tex: root always stacks', h);
   ok(h.indexOf('<span class="fd"><i>s</i> + 1</span>') !== -1, 'tex: denominator add inline', h);
 
-  h = texPreview('1+s', '');
+  h = texPreview('1', '1+s', '');
   ok(h.indexOf('frac') === -1, 'tex: no fraction when denominator empty', h);
   ok(h.indexOf('1 + <i>s</i>') !== -1, 'tex: inline add when no denominator', h);
 
-  h = texPreview('\\frac{1}{1+s}', '');
+  h = texPreview('1', '\\frac{1}{1+s}', '');
   ok(h.indexOf('<span class="frac">') !== -1, 'tex: LaTeX \\frac inside a field', h);
 
-  h = texPreview('bad(((', '1+s');
+  h = texPreview('1', 'bad(((', '1+s');
   ok(h.indexOf('tex-raw') !== -1, 'tex: fallback on parse error', h);
 
-  h = texPreview('<img>', '');
+  h = texPreview('1', '<img>', '');
   ok(h.indexOf('&lt;img&gt;') !== -1, 'tex: fallback escapes HTML', h);
 
-  h = texPreview('', '');
+  h = texPreview('1', '', '');
   ok(h.indexOf('tex-ph') !== -1, 'tex: placeholder when empty', h);
 
   ok(normalizeInput('10⁻⁴s') === '10^(-4)s', 'norm: unicode superscript 10⁻⁴', normalizeInput('10⁻⁴s'));
   ok(normalizeInput('s²+1') === 's^(2)+1', 'norm: unicode superscript s²', normalizeInput('s²+1'));
   ok(normalizeInput('10⁺³') === '10^(3)', 'norm: unicode superscript 10⁺³', normalizeInput('10⁺³'));
-  h = texPreview('1', '1+10⁻⁴s');
+  h = texPreview('1', '1', '1+10⁻⁴s');
   ok(h.indexOf('tex-raw') === -1, 'tex: unicode input parses', h);
   ok(h.indexOf('10⁻⁴') !== -1, 'tex: unicode input renders 10⁻⁴', h);
 
-  h = texPreview('10', '1+s');
+  h = texPreview('10', '1', '1+s');
   ok(h.indexOf('10&nbsp;·&nbsp;') !== -1 &&
      h.indexOf('<span class="fn">1</span>') !== -1 &&
      h.indexOf('<span class="fd">1 + <i>s</i></span>') !== -1,
-    'tex: K beside fraction parts', h);
+    'tex: K field beside fraction parts', h);
 
-  h = texPreview('-2*(1+s)', '1+s');
-  ok(h.indexOf('−2') !== -1, 'tex: negative K keeps unicode minus', h);
+  h = texPreview('1', '-2*(1+s)', '1+s');
+  ok(h.indexOf('−2') !== -1, 'tex: negative scalar keeps unicode minus', h);
 
-  h = texPreview('(s+1)', '2');
+  h = texPreview('1', '(s+1)', '2');
   ok(h.indexOf('frac') === -1 && h.indexOf('0.5') !== -1,
     'tex: scalar-only denominator collapses to K·N', h);
+
+  h = texPreview('2', '1+s', 's');
+  ok(h.indexOf('2&nbsp;·&nbsp;') !== -1 && h.indexOf('<span class="fd"><i>s</i></span>') !== -1,
+    'tex: explicit K field renders beside fraction', h);
+
+  h = texPreview('2*10^4', '1+s', 's');
+  ok(h.indexOf('2·10⁴') !== -1, 'tex: K field accepts 2*10^4', h);
+
+  ok(tfExpr('1', '1', '1+s') === '(1)/(1+s)', 'tfExpr: K=1 omitted', tfExpr('1', '1', '1+s'));
+  ok(tfExpr('10', '1', '1+s') === '(10)*(1)/(1+s)', 'tfExpr: K folded in', tfExpr('10', '1', '1+s'));
+  ok(tfExpr('1', '', '') === '', 'tfExpr: empty → blank', tfExpr('1', '', ''));
+  ok(tfExpr('5', '1+s', '') === '(5)*(1+s)', 'tfExpr: no denominator', tfExpr('5', '1+s', ''));
 
   return { passed, failed: failures.length, failures };
 }
@@ -1640,7 +1705,7 @@ const BodeMath = {
   stateFromTF, checkSolution,
   freqOf, cornerX, magSlopeUnit, phaseTotal,
   polyTrim, polyMul, polyAdd, rootsOf,
-  texPreview, coalesceMirrored,
+  texPreview, tfExpr, coalesceMirrored,
   selfTest,
 };
 

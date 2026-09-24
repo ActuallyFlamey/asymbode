@@ -984,17 +984,20 @@ function showMsg(el, text, show) {
   else { el.hidden = true; el.textContent = ''; }
 }
 
-/** Raw combined expression from the numerator/denominator fields. */
+/** Raw combined expression from the K / numerator / denominator fields. */
 function tfRawExpr() {
-  const num = (els.numInput ? els.numInput.value : '').trim();
-  const den = (els.denInput ? els.denInput.value : '').trim();
-  if (!den) return num;
-  return '(' + (num || '1') + ')/(' + den + ')';
+  return BM.tfExpr(
+    els.kInput && els.kInput.value,
+    els.numInput && els.numInput.value,
+    els.denInput && els.denInput.value);
 }
 
 function updateTfPreview() {
   if (!els.tfRender || !els.numInput || !els.denInput) return;
-  els.tfRender.innerHTML = BM.texPreview(els.numInput.value, els.denInput.value);
+  els.tfRender.innerHTML = BM.texPreview(
+    els.kInput && els.kInput.value,
+    els.numInput.value,
+    els.denInput.value);
 }
 
 function tfSummary(tf) {
@@ -1332,6 +1335,7 @@ function init() {
   els.magCanvas = document.getElementById('magCanvas');
   els.phCanvas = document.getElementById('phCanvas');
   els.status = document.getElementById('status');
+  els.kInput = document.getElementById('kInput');
   els.numInput = document.getElementById('numInput');
   els.denInput = document.getElementById('denInput');
   els.tfRender = document.getElementById('tfRender');
@@ -1357,7 +1361,7 @@ function init() {
   });
 
   document.getElementById('btnLoad').addEventListener('click', loadTF);
-  for (const inp of [els.numInput, els.denInput]) {
+  for (const inp of [els.kInput, els.numInput, els.denInput]) {
     inp.addEventListener('input', updateTfPreview);
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadTF(); });
   }
