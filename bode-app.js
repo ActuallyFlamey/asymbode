@@ -430,7 +430,7 @@ function setStatus(html) { els.status.innerHTML = html; }
 // tools
 // ---------------------------------------------------------------------------
 const TOOL_HINTS = {
-  select: 'Select — click a marker to select · <b>Del</b> removes it · background drag will pan (feature next)',
+  select: 'Select — drag the <b>line</b> for gain · drag a <b>marker</b> for ω · background drag pans · wheel zooms ω',
   zero: 'Place <b>zero</b> — click a plot (snap 0.05 decade, <b>Ctrl</b> = free) · click again to raise order',
   pole: 'Place <b>pole</b> — click a plot (snap 0.05 decade, <b>Ctrl</b> = free) · click again to raise order',
   czero: 'Place <b>complex zero pair</b> (+40 dB/dec) — click a plot',
@@ -536,6 +536,132 @@ function hitElem(px, py, plot) {
 }
 
 // ---------------------------------------------------------------------------
+// drag gestures (pan / gain line / marker) + drag tip
+// ---------------------------------------------------------------------------
+function showDragTip(e, html) {
+  const tip = els.dragTip;
+  const rect = els.plots.getBoundingClientRect();
+  tip.innerHTML = html;
+  tip.hidden = false;
+  tip.style.left = (e.clientX - rect.left) + 'px';
+  tip.style.top = (e.clientY - rect.top) + 'px';
+}
+function hideDragTip() { if (els.dragTip) els.dragTip.hidden = true; }
+
+function onDragMove(info, e) {
+  const d = state.drag;
+  if (!d) return;
+  const dx = info.px - d.startX, dy = info.py - d.startY;
+  if (!d.moved && Math.hypot(dx, dy) <= 3) return;
+  if (!d.moved) d.moved = true;
+
+  if (d.mode === 'pan') {
+    const g = info.g;
+    const spanX = d.view0.xmax - d.view0.xmin;
+    const dxData = dx / g.w * spanX;
+    state.view.xmin = d.view0.xmin - dxData;
+    state.view.xmax = d.view0.xmax - dxData;
+    const yr0 = info.plot === 'mag' ? d.view0.yMag : d.view0.yPh;
+    const spanY = yr0.max - yr0.min;
+    const dyData = dy / g.h * spanY;
+    const yr = info.plot === 'mag' ? state.yMag : state.yPh;
+    yr.min = yr0.min + dyData;
+    yr.max = yr0.max + dyData;
+    showDragTip(e,
+      'ω <span class="val">' + fmtW(Math.pow(10, state.view.xmin)) + '</span> … ' +
+      '<span class="val">' + fmtW(Math.pow(10, state.view.xmax)) + '</span>' +
+      (info.plot === 'mag'
+        ? ' · y <span class="val">' + fmtNum(yr.min, 3) + '</span>…<span class="val">' + fmtNum(yr.max, 3) + '</span> dB'
+        : ' · y <span class="val">' + fmtNum(yr.min) + '</span>…<span class="val">' + fmtNum(yr.max) + '</span>°'));
+  } else if (d.mode === 'line') {
+    const g = info.g;
+    const yStartVal = pxToY(d.startY, g, d.view0.yMag);
+    const yNow = pxToY(info.py, g, d.view0.yMag);
+    const gain = Math.round(clamp(d.gain0 + (yNow - yStartVal), -200, 200) * 10) / 10;
+    state.user.gainDB = gain;
+    updateGainUI();
+    showDragTip(e,
+      '20 lg|K| = <span class="val">' + fmtNum(gain) + '</span> dB · |K| = <span class="val">' +
+      fmtNum(Math.pow(10, gain / 20)) + '</span>');
+  } else if (d.mode === 'marker') {
+    const el = state.user.elems.find(x => x.id === d.id);
+    if (!el) return;
+    const free = e.ctrlKey || e.metaKey;
+    let xLog = free ? info.xLog : Math.round(info.xLog / 0.05) * 0.05;
+    xLog = clamp(xLog, state.view.xmin, state.view.xmax);
+    const w = Math.pow(10, xLog);
+    if (el.kind === 'real') el.w = w; else el.wn = w;
+    updateElemList();
+    showDragTip(e,
+      elemLabel(el) + ' → ω = <span class="val">' + fmtW(w) + '</span>' +
+      (free ? ' <span class="val">free</span>' : ' <span class="val">snap 0.05</span>'));
+  }
+  render();
+}
+
+function endDrag() {
+  const d = state.drag;
+  if (!d) return;
+  state.drag = null;
+  hideDragTip();
+  if (d.canvas && d.pointerId != null) {
+    try { d.canvas.releasePointerCapture(d.pointerId); } catch (_) { /* already released */ }
+  }
+  if (d.moved) {
+    if (d.mode === 'line')
+      setStatus('Gain 20 lg|K| = <span class="val">' + fmtNum(state.user.gainDB) +
+        '</span> dB · |K| = <span class="val">' + fmtNum(Math.pow(10, state.user.gainDB / 20)) + '</span>');
+    else if (d.mode === 'pan')
+      setStatus('View ω <span class="val">' + fmtW(Math.pow(10, state.view.xmin)) + '</span> … <span class="val">' +
+        fmtW(Math.pow(10, state.view.xmax)) + '</span> rad/s');
+    else if (d.mode === 'marker') {
+      const el = state.user.elems.find(x => x.id === d.id);
+      if (el)
+        setStatus('Moved <b>' + elemLabel(el) + '</b> to ω = <span class="val">' + fmtW(BM.freqOf(el)) + '</span>');
+    }
+    updateSidebar();
+  }
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// fit view
+// ---------------------------------------------------------------------------
+function fitView() {
+  const xs = [];
+  const collect = (st) => { if (st) for (const e of st.elems) xs.push(BM.cornerX(e)); };
+  collect(state.user);
+  if (state.tfState) collect(state.tfState);
+  let xmin, xmax;
+  if (xs.length) { xmin = Math.min.apply(null, xs); xmax = Math.max.apply(null, xs); }
+  else { xmin = -1; xmax = 1; }
+  if (xmax - xmin < 2) { const m = (xmin + xmax) / 2; xmin = m - 1; xmax = m + 1; }
+  xmin -= 0.5; xmax += 0.5;
+  state.view.xmin = xmin;
+  state.view.xmax = xmax;
+
+  let ymin = Infinity, ymax = -Infinity, pmin = Infinity, pmax = -Infinity;
+  const consider = (st) => {
+    if (!st) return;
+    for (const p of BM.asymMagPoints(st, xmin, xmax)) {
+      if (p.y < ymin) ymin = p.y;
+      if (p.y > ymax) ymax = p.y;
+    }
+    for (const p of BM.asymPhasePoints(st, xmin, xmax)) {
+      if (p.y < pmin) pmin = p.y;
+      if (p.y > pmax) pmax = p.y;
+    }
+  };
+  consider(state.user);
+  if (state.showSol) consider(state.tfState);
+  state.yMag = niceYBounds(isFinite(ymin) ? ymin : -40, isFinite(ymax) ? ymax : 40, false);
+  state.yPh = niceYBounds(isFinite(pmin) ? pmin : -225, isFinite(pmax) ? pmax : 225, true);
+  setStatus('Fitted view to ω <span class="val">' + fmtW(Math.pow(10, xmin)) + '</span> … <span class="val">' +
+    fmtW(Math.pow(10, xmax)) + '</span> rad/s');
+  render();
+}
+
+// ---------------------------------------------------------------------------
 // pointer interaction
 // ---------------------------------------------------------------------------
 function canvasInfo(canvas, plot, e) {
@@ -574,37 +700,94 @@ function updateHover(canvas, plot, e) {
 
 function bindCanvas(canvas, plot) {
   canvas.addEventListener('pointermove', (e) => {
+    const info = canvasInfo(canvas, plot, e);
+    if (state.drag && state.drag.pointerId === e.pointerId) {
+      if (info.inPlot) onDragMove(info, e);
+      return;
+    }
     updateHover(canvas, plot, e);
-    // feature 4: drag gestures hook here via state.drag
   });
   canvas.addEventListener('pointerleave', () => {
+    if (state.drag) return;
     state.hover = null;
     render();
   });
+  canvas.addEventListener('pointerup', (e) => {
+    if (state.drag && state.drag.pointerId === e.pointerId) endDrag();
+  });
+  canvas.addEventListener('pointercancel', () => endDrag());
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     const info = canvasInfo(canvas, plot, e);
     if (!info.inPlot) return;
     const t = state.tool;
+
     if (t === 'zero' || t === 'pole' || t === 'czero' || t === 'cpole') {
       placeAt(info.xLog, e.ctrlKey || e.metaKey);
       updateHover(canvas, plot, e);
-    } else if (t === 'delete') {
-      const hit = hitElem(info.px, info.py, plot);
-      if (hit) removeElem(hit.id);
+      return;
+    }
+    if (t === 'delete') {
+      const hitD = hitElem(info.px, info.py, plot);
+      if (hitD) removeElem(hitD.id);
       else setStatus('Nothing to delete there');
       updateHover(canvas, plot, e);
-    } else {
-      const hit = hitElem(info.px, info.py, plot);
-      state.selId = hit ? hit.id : null;
-      if (hit)
-        setStatus('Selected <b>' + elemLabel(hit) + '</b> ×' + hit.order +
-          ' at ω = <span class="val">' + fmtW(BM.freqOf(hit)) + '</span> — <b>Del</b> to remove, edit order in the list');
-      else setStatus('Deselected');
-      updateSidebar();
-      updateHover(canvas, plot, e);
+      return;
     }
+
+    // select tool: click selects, then possibly start a drag gesture
+    const hit = hitElem(info.px, info.py, plot);
+    state.selId = hit ? hit.id : null;
+    if (hit)
+      setStatus('Selected <b>' + elemLabel(hit) + '</b> ×' + hit.order +
+        ' at ω = <span class="val">' + fmtW(BM.freqOf(hit)) + '</span> — drag to move, <b>Del</b> to remove');
+    else
+      setStatus('Background — drag to pan, wheel to zoom ω');
+    updateSidebar();
+
+    let mode = 'pan';
+    if (hit) mode = 'marker';
+    else if (plot === 'mag') {
+      const yAt = BM.asymMag(state.user, info.xLog);
+      const yPx = yToPx(yAt, info.g, state.yMag);
+      if (Math.abs(info.py - yPx) <= 7) mode = 'line';
+    }
+    state.drag = {
+      mode, pointerId: e.pointerId, plot, canvas,
+      id: hit ? hit.id : null,
+      startX: info.px, startY: info.py,
+      view0: {
+        xmin: state.view.xmin, xmax: state.view.xmax,
+        yMag: { min: state.yMag.min, max: state.yMag.max },
+        yPh: { min: state.yPh.min, max: state.yPh.max },
+      },
+      gain0: state.user.gainDB,
+      moved: false,
+    };
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* ok */ }
+    updateHover(canvas, plot, e);
   });
+}
+
+function bindWheel(canvas, plot) {
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const info = canvasInfo(canvas, plot, e);
+    if (!info.inPlot) return;
+    const span = state.view.xmax - state.view.xmin;
+    if (span <= 0.5 && e.deltaY > 0) return;
+    if (span >= 24 && e.deltaY < 0) return;
+    const f = e.deltaY < 0 ? 1 / 1.12 : 1.12;
+    const xc = clamp(info.xLog, state.view.xmin, state.view.xmax);
+    const xmin = xc + (state.view.xmin - xc) * f;
+    const xmax = xc + (state.view.xmax - xc) * f;
+    if (xmax - xmin < 0.4 || xmax - xmin > 24) return;
+    state.view.xmin = xmin;
+    state.view.xmax = xmax;
+    render();
+    setStatus('Zoom ω <span class="val">' + fmtW(Math.pow(10, xmin)) + '</span> … <span class="val">' +
+      fmtW(Math.pow(10, xmax)) + '</span> rad/s');
+  }, { passive: false });
 }
 
 // ---------------------------------------------------------------------------
@@ -772,6 +955,7 @@ function onKeyDown(e) {
   else if (k === 'd') setTool('delete');
   else if (k === 'escape') setTool('select');
   else if (k === 'delete' || k === 'backspace') { e.preventDefault(); removeSelected(); }
+  else if (k === 'f') fitView();
   else return;
 }
 
@@ -794,6 +978,8 @@ function init() {
   els.lgSolution = document.getElementById('lgSolution');
   els.lgExact = document.getElementById('lgExact');
   els.checkResults = document.getElementById('checkResults');
+  els.dragTip = document.getElementById('dragTip');
+  els.plots = document.querySelector('.plots');
 
   document.querySelectorAll('.tool').forEach(btn => {
     btn.addEventListener('click', () => setTool(btn.dataset.tool));
@@ -803,6 +989,7 @@ function init() {
   els.tfInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadTF(); });
 
   document.getElementById('btnClear').addEventListener('click', clearUser);
+  document.getElementById('btnFit').addEventListener('click', fitView);
 
   document.getElementById('z0Plus').addEventListener('click', () => {
     state.user.z0 = clamp(state.user.z0 + 1, 0, 8);
@@ -846,6 +1033,8 @@ function init() {
 
   bindCanvas(els.magCanvas, 'mag');
   bindCanvas(els.phCanvas, 'ph');
+  bindWheel(els.magCanvas, 'mag');
+  bindWheel(els.phCanvas, 'ph');
   document.addEventListener('keydown', onKeyDown);
 
   const ro = new ResizeObserver(() => resizeAll());
@@ -858,7 +1047,7 @@ function init() {
 
 window.__bode = {
   state, setTool, render, resizeAll, setStatus,
-  loadTF, placeAt, removeElem, clearUser, updateSidebar,
+  loadTF, placeAt, removeElem, clearUser, updateSidebar, fitView,
   helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem },
 };
 
