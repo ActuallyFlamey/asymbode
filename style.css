@@ -148,7 +148,7 @@ body {
   border-bottom: 1.4px solid currentColor;
 }
 .tf-render .frac .fd { padding: .1em .4em 0; }
-.tf-render sup { font-size: .68em; }
+.tf-render sup { font-size: 12px; line-height: 1; }
 .tex-ph { color: var(--muted); font-style: italic; }
 .tex-raw { font-family: var(--mono); font-size: 12.5px; color: var(--amber); }
 

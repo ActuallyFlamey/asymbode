@@ -75,6 +75,14 @@ function normalizeInput(raw) {
   s = s.replace(/[×⋅∙·]/g, '*');
   s = s.replace(/[‘’]/g, "'");
 
+  // unicode superscripts (s², 10⁻⁴) → ^(…) so they parse
+  s = s.replace(/([⁻⁺]?)([⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g, (m, sign, digits) => {
+    let n = '';
+    for (const c of digits) n += '0123456789'['⁰¹²³⁴⁵⁶⁷⁸⁹'.indexOf(c)];
+    if (sign === '⁻') n = '-' + n;
+    return '^(' + n + ')';
+  });
+
   // strip "G(s) =" / "G_{(s)} =" / "Y(s):=" style left-hand side
   s = s.replace(/^\s*[A-Za-z][A-Za-z0-9]*\s*[_^]?\s*\{\s*\(\s*[A-Za-z]\s*\)\s*\}\s*[:]?=\s*/, '');
   // …or a bare "Y =" / "K =" style assignment
@@ -929,7 +937,15 @@ function texEscapeHtml(s) {
 }
 
 function texSupHtml(e) {
+  if (Number.isInteger(e)) return sup(e);
   return '<sup>' + (e < 0 ? '−' + Math.abs(e) : String(e)) + '</sup>';
+}
+
+/** Numeric pow exponent as an integer value, else null (e.g. s^s, 10^0.5). */
+function powExpInt(n) {
+  if (n.t === 'num' && Number.isInteger(n.v)) return n.v;
+  if (n.t === 'neg' && n.a.t === 'num' && Number.isInteger(n.a.v)) return -n.a.v;
+  return null;
 }
 
 function texNumHtml(v) {
@@ -1035,8 +1051,10 @@ function texHtml(node, minPrec, opts) {
     case 'pow': {
       const base = texHtml(node.a, 5);
       const exp = texHtml(node.b, 1.5);
+      const ei = powExpInt(node.b);
+      const expHtml = ei !== null ? sup(ei) : '<sup>' + exp.html + '</sup>';
       return {
-        html: wrap(base.html + '<sup>' + exp.html + '</sup>', 4),
+        html: wrap(base.html + expHtml, 4),
         numeric: base.numeric && exp.numeric,
       };
     }
@@ -1447,7 +1465,7 @@ function selfTest() {
   ok(h.indexOf('<i>G</i>(<i>s</i>)') === 0, 'tex: G(s) head', h);
   ok(h.indexOf('<span class="frac">') !== -1, 'tex: stacked fraction', h);
   ok(h.indexOf('<i>s</i>') !== -1, 'tex: italic s', h);
-  ok(h.indexOf('10<sup>−4</sup>') !== -1, 'tex: 10^-4 superscript', h);
+  ok(h.indexOf('10⁻⁴') !== -1, 'tex: 10^-4 superscript', h);
 
   h = texPreview('10*(1+s/10)', 's*(1+s/1000)');
   ok(h.indexOf('10(1 + <i>s</i>/10)') !== -1, 'tex: numerator juxtaposition', h);
@@ -1455,8 +1473,8 @@ function selfTest() {
   ok(h.indexOf('<span class="frac">') !== -1, 'tex: product over product stacks', h);
 
   h = texPreview('2*10^4', 's^2+1.4*s+100');
-  ok(h.indexOf('2·10<sup>4</sup>') !== -1, 'tex: numeric factors use ·', h);
-  ok(h.indexOf('<i>s</i><sup>2</sup>') !== -1, 'tex: s^2 superscript', h);
+  ok(h.indexOf('2·10⁴') !== -1, 'tex: numeric factors use ·', h);
+  ok(h.indexOf('<i>s</i>²') !== -1, 'tex: s^2 superscript', h);
   ok(h.indexOf('1.4<i>s</i>') !== -1, 'tex: 1.4s juxtaposition', h);
 
   h = texPreview('(s+1)*(s+2)', '1');
@@ -1481,6 +1499,13 @@ function selfTest() {
 
   h = texPreview('', '');
   ok(h.indexOf('tex-ph') !== -1, 'tex: placeholder when empty', h);
+
+  ok(normalizeInput('10⁻⁴s') === '10^(-4)s', 'norm: unicode superscript 10⁻⁴', normalizeInput('10⁻⁴s'));
+  ok(normalizeInput('s²+1') === 's^(2)+1', 'norm: unicode superscript s²', normalizeInput('s²+1'));
+  ok(normalizeInput('10⁺³') === '10^(3)', 'norm: unicode superscript 10⁺³', normalizeInput('10⁺³'));
+  h = texPreview('1', '1+10⁻⁴s');
+  ok(h.indexOf('tex-raw') === -1, 'tex: unicode input parses', h);
+  ok(h.indexOf('10⁻⁴') !== -1, 'tex: unicode input renders 10⁻⁴', h);
 
   h = texPreview('10', '1+s');
   ok(h.indexOf('<span class="fn">10</span>') !== -1 &&
