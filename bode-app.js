@@ -1205,12 +1205,12 @@ function showSolutionAndCheck() {
   }
   const res = BM.checkSolution(state.tf, state.user);
   state.showSol = true;
+  fitView();
   renderCheck(res);
   updateLegend();
   setStatus('Solution shown — score <b>' + res.score.ok + '/' + res.score.total + '</b>' +
     (res.score.ok === res.score.total ? ' — perfect!' : '') +
     ' · hold <b>Ctrl</b> for the real Bode plot · <b>F</b> fits the view');
-  render();
   return res;
 }
 
