@@ -1,16 +1,25 @@
-/* asymbode — app shell: layout, log axes, grid rendering */
+/* asymbode — app: rendering, placement tools, sidebar */
 (function () {
 'use strict';
 
+const BM = window.BodeMath;
+
 // ---------------------------------------------------------------------------
-// state (extended by later features)
+// state
 // ---------------------------------------------------------------------------
 const state = {
   view: { xmin: -3, xmax: 3 },          // log10(omega) window
   yMag: { min: -40, max: 40 },
   yPh: { min: -225, max: 225 },
   tool: 'select',
-  hover: null,                           // {xLog, plot:'mag'|'ph'}
+  hover: null,                           // {plot, px, py, xLog, yVal, elemId, shift, free}
+  user: { gainDB: 0, gainSign: 1, z0: 0, p0: 0, elems: [] },
+  selId: null,
+  nextId: 1,
+  tf: null,                              // parsed truth TF
+  tfState: null,                         // stateFromTF(tf)
+  showSol: false,                        // solution overlay visible (feature 5)
+  drag: null,                            // active pointer gesture (feature 4)
 };
 
 const MARGINS = { l: 56, r: 14, t: 12, b: 30 };
@@ -114,7 +123,6 @@ function drawAxes(ctx, w, h, yr, opts) {
   ctx.fillStyle = DARK.plot;
   ctx.fillRect(0, 0, w, h);
 
-  // plot background
   ctx.fillStyle = '#0c1118';
   ctx.fillRect(g.l, g.t, g.w, g.h);
 
@@ -129,7 +137,6 @@ function drawAxes(ctx, w, h, yr, opts) {
   ctx.rect(g.l, g.t, g.w, g.h);
   ctx.clip();
 
-  // minor vertical (2..9 per decade)
   if (minor) {
     ctx.strokeStyle = DARK.grid;
     ctx.lineWidth = 1;
@@ -143,7 +150,6 @@ function drawAxes(ctx, w, h, yr, opts) {
     ctx.stroke();
   }
 
-  // major vertical (decades)
   ctx.strokeStyle = DARK.gridBold;
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -153,7 +159,6 @@ function drawAxes(ctx, w, h, yr, opts) {
   }
   ctx.stroke();
 
-  // horizontal grid
   ctx.strokeStyle = DARK.grid;
   ctx.beginPath();
   for (let y = Math.ceil(yr.min / step) * step; y <= yr.max + 1e-9; y += step) {
@@ -164,12 +169,10 @@ function drawAxes(ctx, w, h, yr, opts) {
 
   ctx.restore();
 
-  // frame
   ctx.strokeStyle = DARK.gridBold;
   ctx.lineWidth = 1;
   ctx.strokeRect(g.l + .5, g.t + .5, g.w - 1, g.h - 1);
 
-  // y labels
   ctx.fillStyle = DARK.axis;
   ctx.font = '11px system-ui, sans-serif';
   ctx.textAlign = 'right';
@@ -183,7 +186,6 @@ function drawAxes(ctx, w, h, yr, opts) {
     ctx.fillText(label, g.l - 7, py);
   }
 
-  // x labels (decades)
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   const labelStep = Math.max(1, Math.ceil(decs.length / 14));
@@ -194,7 +196,6 @@ function drawAxes(ctx, w, h, yr, opts) {
     ctx.fillText(fmtDecade(k), x, g.b + 7);
   });
 
-  // axis titles
   ctx.fillStyle = DARK.title;
   ctx.font = '600 11px system-ui, sans-serif';
   ctx.textAlign = 'left';
@@ -207,13 +208,209 @@ function drawAxes(ctx, w, h, yr, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// curve drawing
+// ---------------------------------------------------------------------------
+function drawPolyline(ctx, pts, g, yr, color, width, dash) {
+  if (!pts || pts.length < 2) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(g.l, g.t, g.w, g.h);
+  ctx.clip();
+  ctx.beginPath();
+  pts.forEach((p, i) => {
+    const px = xToPx(p.x, g), py = yToPx(p.y, g, yr);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width || 2;
+  ctx.setLineDash(dash || []);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Raw-power ghost: dotted slope preview (mag plot only). */
+function ghostPoints() {
+  const u = state.user;
+  const hov = state.hover;
+  if (!hov) return null;
+  const t = state.tool;
+  const placeTool = t === 'zero' || t === 'pole' || t === 'czero' || t === 'cpole';
+
+  let elem = null, xc;
+  if (placeTool) {
+    const type = (t === 'zero' || t === 'czero') ? 'zero' : 'pole';
+    const kind = (t === 'zero' || t === 'pole') ? 'real' : 'complex';
+    xc = hov.free ? hov.xLog : Math.round(hov.xLog / 0.05) * 0.05;
+    const ex = u.elems.find(e =>
+      e.type === type && e.kind === kind &&
+      Math.abs(BM.cornerX(e) - xc) <= 0.025);
+    const order = ex ? ex.order + 1 : 1;
+    elem = kind === 'complex'
+      ? { type, kind: 'complex', wn: 1, zeta: 0.5, order }
+      : { type, kind: 'real', w: 1, order };
+  } else if (hov.shift && hov.elemId != null) {
+    const e = u.elems.find(el => el.id === hov.elemId);
+    if (!e) return null;
+    elem = e;
+    xc = BM.cornerX(e);
+  } else return null;
+
+  if (xc < state.view.xmin || xc > state.view.xmax) return null;
+  const y0 = BM.asymMag(u, xc);
+  const slope = BM.magSlopeUnit(elem) * elem.order;
+  const xmax = state.view.xmax;
+  return {
+    xc,
+    pts: [{ x: xc, y: y0 }, { x: xmax, y: y0 + slope * (xmax - xc) }],
+  };
+}
+
+function elemColor(e) { return e.type === 'zero' ? DARK.zero : DARK.pole; }
+function elemLabel(e) {
+  const kind = e.kind === 'complex' ? 'c.' : '';
+  const type = e.type === 'zero' ? 'zero' : 'pole';
+  return kind + type;
+}
+
+function markerPos(e, g, yr, plot) {
+  const xc = BM.cornerX(e);
+  const yv = plot === 'mag' ? BM.asymMag(state.user, xc) : BM.asymPhase(state.user, xc);
+  return { px: xToPx(xc, g), py: yToPx(yv, g, yr), xc };
+}
+
+function drawMarker(ctx, px, py, e, opts) {
+  const sel = opts.selected, hov = opts.hovered;
+  const r = 5.5;
+  ctx.save();
+  ctx.lineWidth = sel ? 2.5 : 1.8;
+
+  if (e.kind === 'complex') {
+    // diamond: outlined = zero, filled = pole
+    ctx.beginPath();
+    ctx.moveTo(px, py - r - 1);
+    ctx.lineTo(px + r + 1, py);
+    ctx.lineTo(px, py + r + 1);
+    ctx.lineTo(px - r - 1, py);
+    ctx.closePath();
+    if (e.type === 'pole') { ctx.fillStyle = DARK.cplx; ctx.fill(); }
+    else { ctx.fillStyle = '#0c1118'; ctx.fill(); ctx.strokeStyle = DARK.cplx; ctx.stroke(); }
+    if (e.type === 'zero') { ctx.strokeStyle = DARK.cplx; ctx.stroke(); }
+  } else if (e.type === 'zero') {
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#0c1118';
+    ctx.fill();
+    ctx.strokeStyle = DARK.zero;
+    ctx.stroke();
+    // inner dot (double ring for order>1 shown via label anyway)
+    if (e.order > 1) {
+      ctx.beginPath();
+      ctx.arc(px, py, r - 2.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  } else {
+    // pole ×
+    const s = r + 1;
+    ctx.strokeStyle = DARK.pole;
+    ctx.beginPath();
+    ctx.moveTo(px - s, py - s); ctx.lineTo(px + s, py + s);
+    ctx.moveTo(px + s, py - s); ctx.lineTo(px - s, py + s);
+    ctx.stroke();
+    if (e.order > 1) {
+      ctx.beginPath();
+      ctx.arc(px, py, r - 1, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  if (sel) {
+    ctx.beginPath();
+    ctx.arc(px, py, r + 4, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } else if (hov) {
+    ctx.beginPath();
+    ctx.arc(px, py, r + 3, 0, Math.PI * 2);
+    ctx.strokeStyle = DARK.hover;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  if (e.order > 1) {
+    ctx.font = '600 11px system-ui, sans-serif';
+    ctx.fillStyle = DARK.text;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('×' + e.order, px + r + 3, py - r + 1);
+  }
+  ctx.restore();
+}
+
+function drawMarkers(ctx, w, h, yr, plot) {
+  const g = geom(w, h);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(g.l, g.t, g.w, g.h);
+  ctx.clip();
+  for (const e of state.user.elems) {
+    const xc = BM.cornerX(e);
+    if (xc < state.view.xmin || xc > state.view.xmax) continue;
+    const { px, py } = markerPos(e, g, yr, plot);
+    if (py < g.t - 20 || py > g.b + 20) continue;
+    drawMarker(ctx, px, py, e, {
+      selected: e.id === state.selId,
+      hovered: state.hover && state.hover.elemId === e.id,
+    });
+  }
+  ctx.restore();
+}
+
+function drawCrosshair(ctx, w, h, yr, plot) {
+  const hov = state.hover;
+  if (!hov || hov.plot !== plot) return;
+  const g = geom(w, h);
+  const px = xToPx(hov.xLog, g);
+  if (px < g.l || px > g.r) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(g.l, g.t, g.w, g.h);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 4]);
+  ctx.beginPath();
+  ctx.moveTo(px + .5, g.t);
+  ctx.lineTo(px + .5, g.b);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
 // render
 // ---------------------------------------------------------------------------
 function render() {
   if (!magCtx) return;
   const gy = drawAxes(magCtx, magW, magH, state.yMag, { yUnit: 'dB', isPhase: false });
   const gp = drawAxes(phCtx, phW, phH, state.yPh, { yUnit: 'deg', isPhase: true });
-  void gy; void gp;
+
+  drawCrosshair(magCtx, magW, magH, state.yMag, 'mag');
+  drawCrosshair(phCtx, phW, phH, state.yPh, 'ph');
+
+  // user asymptotes
+  const mpts = BM.asymMagPoints(state.user, state.view.xmin, state.view.xmax);
+  const ppts = BM.asymPhasePoints(state.user, state.view.xmin, state.view.xmax);
+  drawPolyline(magCtx, mpts, gy, state.yMag, DARK.user, 2.2);
+  drawPolyline(phCtx, ppts, gp, state.yPh, DARK.user, 2.2);
+
+  // raw-power ghost (dotted)
+  const gh = ghostPoints();
+  if (gh) drawPolyline(magCtx, gh.pts, gy, state.yMag, 'rgba(255,255,255,0.55)', 1.4, [4, 4]);
+
+  drawMarkers(magCtx, magW, magH, state.yMag, 'mag');
+  drawMarkers(phCtx, phW, phH, state.yPh, 'ph');
 }
 
 function resizeAll() {
@@ -230,11 +427,352 @@ function resizeAll() {
 function setStatus(html) { els.status.innerHTML = html; }
 
 // ---------------------------------------------------------------------------
-// tools UI
+// tools
 // ---------------------------------------------------------------------------
+const TOOL_HINTS = {
+  select: 'Select — click a marker to select · <b>Del</b> removes it · background drag will pan (feature next)',
+  zero: 'Place <b>zero</b> — click a plot (snap 0.05 decade, <b>Ctrl</b> = free) · click again to raise order',
+  pole: 'Place <b>pole</b> — click a plot (snap 0.05 decade, <b>Ctrl</b> = free) · click again to raise order',
+  czero: 'Place <b>complex zero pair</b> (+40 dB/dec) — click a plot',
+  cpole: 'Place <b>complex pole pair</b> (−40 dB/dec) — click a plot',
+  delete: 'Delete — click a marker to remove it',
+};
+
 function setTool(tool) {
   state.tool = tool;
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  setStatus(TOOL_HINTS[tool] || tool);
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// user model actions
+// ---------------------------------------------------------------------------
+function placeAt(xLog, free) {
+  const t = state.tool;
+  if (t !== 'zero' && t !== 'pole' && t !== 'czero' && t !== 'cpole') return null;
+  const type = (t === 'zero' || t === 'czero') ? 'zero' : 'pole';
+  const kind = (t === 'zero' || t === 'pole') ? 'real' : 'complex';
+  const snap = free ? xLog : Math.round(xLog / 0.05) * 0.05;
+  const u = state.user;
+  const ex = u.elems.find(e =>
+    e.type === type && e.kind === kind &&
+    Math.abs(BM.cornerX(e) - snap) <= 0.025);
+
+  let elem;
+  if (ex) {
+    ex.order++;
+    elem = ex;
+  } else {
+    elem = kind === 'real'
+      ? { id: state.nextId++, type, kind: 'real', w: Math.pow(10, snap), order: 1 }
+      : { id: state.nextId++, type, kind: 'complex', wn: Math.pow(10, snap), zeta: 0.5, order: 1 };
+    u.elems.push(elem);
+  }
+  state.selId = elem.id;
+
+  const slope = BM.magSlopeUnit(elem) * elem.order;
+  setStatus(
+    (ex ? 'Raised ' : 'Placed ') + '<b>' + elemLabel(elem) + '</b> ×' + elem.order +
+    ' at ω = <span class="val">' + fmtW(BM.freqOf(elem)) + '</span> rad/s' +
+    ' · slope ' + (slope > 0 ? '+' : '−') + Math.abs(slope) + ' dB/dec above the corner'
+  );
+  updateSidebar();
+  render();
+  return elem;
+}
+
+function removeElem(id) {
+  const u = state.user;
+  const i = u.elems.findIndex(e => e.id === id);
+  if (i < 0) return false;
+  const e = u.elems[i];
+  u.elems.splice(i, 1);
+  if (state.selId === id) state.selId = null;
+  setStatus('Removed <b>' + elemLabel(e) + '</b> at ω = <span class="val">' + fmtW(BM.freqOf(e)) + '</span>');
+  updateSidebar();
+  render();
+  return true;
+}
+
+function removeSelected() {
+  if (state.selId == null) { setStatus('Nothing selected — click a marker first'); return; }
+  removeElem(state.selId);
+}
+
+function clearUser() {
+  state.user.gainDB = 0;
+  state.user.gainSign = 1;
+  state.user.z0 = 0;
+  state.user.p0 = 0;
+  state.user.elems = [];
+  state.selId = null;
+  state.showSol = false;
+  if (els.lgSolution) els.lgSolution.hidden = true;
+  if (els.lgExact) els.lgExact.hidden = true;
+  if (els.checkResults)
+    els.checkResults.innerHTML = '<div class="empty-hint">Load a transfer function, draw your asymptote, then press <b>Show solution &amp; Check</b>.</div>';
+  setStatus('Cleared your drawing (the loaded transfer function is kept)');
+  updateSidebar();
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// hit-testing
+// ---------------------------------------------------------------------------
+function hitElem(px, py, plot) {
+  const g = plot === 'mag' ? geom(magW, magH) : geom(phW, phH);
+  const yr = plot === 'mag' ? state.yMag : state.yPh;
+  let best = null, bestD = 12;
+  for (const e of state.user.elems) {
+    const xc = BM.cornerX(e);
+    if (xc < state.view.xmin || xc > state.view.xmax) continue;
+    const yv = plot === 'mag' ? BM.asymMag(state.user, xc) : BM.asymPhase(state.user, xc);
+    const ex = xToPx(xc, g), ey = yToPx(yv, g, yr);
+    const d = Math.hypot(ex - px, ey - py);
+    if (d <= bestD) { bestD = d; best = e; }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
+// pointer interaction
+// ---------------------------------------------------------------------------
+function canvasInfo(canvas, plot, e) {
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+  const g = plot === 'mag' ? geom(magW, magH) : geom(phW, phH);
+  const yr = plot === 'mag' ? state.yMag : state.yPh;
+  const xLog = pxToX(px, g);
+  const yVal = pxToY(py, g, yr);
+  const inPlot = px >= g.l && px <= g.r && py >= g.t && py <= g.b;
+  return { px, py, xLog, yVal, inPlot, g, yr, plot };
+}
+
+function updateHover(canvas, plot, e) {
+  const info = canvasInfo(canvas, plot, e);
+  const hit = info.inPlot ? hitElem(info.px, info.py, plot) : null;
+  state.hover = {
+    plot, px: info.px, py: info.py, xLog: info.xLog, yVal: info.yVal,
+    inPlot: info.inPlot, elemId: hit ? hit.id : null,
+    shift: e.shiftKey, free: e.ctrlKey || e.metaKey,
+  };
+  if (info.inPlot) {
+    const w = Math.pow(10, info.xLog);
+    let extra = '';
+    if (hit) extra = ' · hovered <b>' + elemLabel(hit) + '</b> at ω = <span class="val">' + fmtW(BM.freqOf(hit)) + '</span>';
+    if (plot === 'mag')
+      setStatus('ω = <span class="val">' + fmtW(w) + '</span> · <span class="val">' +
+        fmtNum(info.yVal) + '</span> dB' + extra);
+    else
+      setStatus('ω = <span class="val">' + fmtW(w) + '</span> · <span class="val">' +
+        fmtNum(info.yVal) + '</span>°' + extra);
+  }
+  render();
+}
+
+function bindCanvas(canvas, plot) {
+  canvas.addEventListener('pointermove', (e) => {
+    updateHover(canvas, plot, e);
+    // feature 4: drag gestures hook here via state.drag
+  });
+  canvas.addEventListener('pointerleave', () => {
+    state.hover = null;
+    render();
+  });
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const info = canvasInfo(canvas, plot, e);
+    if (!info.inPlot) return;
+    const t = state.tool;
+    if (t === 'zero' || t === 'pole' || t === 'czero' || t === 'cpole') {
+      placeAt(info.xLog, e.ctrlKey || e.metaKey);
+      updateHover(canvas, plot, e);
+    } else if (t === 'delete') {
+      const hit = hitElem(info.px, info.py, plot);
+      if (hit) removeElem(hit.id);
+      else setStatus('Nothing to delete there');
+      updateHover(canvas, plot, e);
+    } else {
+      const hit = hitElem(info.px, info.py, plot);
+      state.selId = hit ? hit.id : null;
+      if (hit)
+        setStatus('Selected <b>' + elemLabel(hit) + '</b> ×' + hit.order +
+          ' at ω = <span class="val">' + fmtW(BM.freqOf(hit)) + '</span> — <b>Del</b> to remove, edit order in the list');
+      else setStatus('Deselected');
+      updateSidebar();
+      updateHover(canvas, plot, e);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// load TF
+// ---------------------------------------------------------------------------
+function showMsg(el, text, show) {
+  if (!el) return;
+  if (show) { el.textContent = text; el.hidden = false; }
+  else { el.hidden = true; el.textContent = ''; }
+}
+
+function tfSummary(tf) {
+  const parts = [];
+  parts.push('K = ' + fmtNum(tf.gain));
+  if (tf.z0) parts.push('s' + supStr(tf.z0));
+  if (tf.p0) parts.push('1/s' + supStr(tf.p0));
+  for (const z of tf.zeros)
+    parts.push((z.kind === 'complex' ? 'zero pair' : 'zero') + '@' + fmtW(BM.freqOf(z)) + (z.order > 1 ? ' ×' + z.order : ''));
+  for (const p of tf.poles)
+    parts.push((p.kind === 'complex' ? 'pole pair' : 'pole') + '@' + fmtW(BM.freqOf(p)) + (p.order > 1 ? ' ×' + p.order : ''));
+  return parts.join(' · ');
+}
+
+function loadTF() {
+  const raw = els.tfInput.value;
+  try {
+    const tf = BM.parseTransferFunction(raw);
+    state.tf = tf;
+    state.tfState = BM.stateFromTF(tf);
+    state.showSol = false;
+    if (els.lgSolution) els.lgSolution.hidden = true;
+    if (els.lgExact) els.lgExact.hidden = true;
+    showMsg(els.tfOk, 'G(s) loaded — ' + tfSummary(tf), true);
+    showMsg(els.tfError, '', false);
+    setStatus('Transfer function loaded — place poles &amp; zeros to match its Bode plot, then <b>Show solution &amp; Check</b>');
+    return tf;
+  } catch (err) {
+    state.tf = null;
+    state.tfState = null;
+    showMsg(els.tfError, 'G(s) error: ' + err.message, true);
+    showMsg(els.tfOk, '', false);
+    setStatus('Could not parse the transfer function');
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// sidebar
+// ---------------------------------------------------------------------------
+function updateOriginCounts() {
+  els.z0Count.textContent = String(state.user.z0);
+  els.p0Count.textContent = String(state.user.p0);
+  els.z0Count.classList.toggle('nonzero', state.user.z0 !== 0);
+  els.p0Count.classList.toggle('nonzero', state.user.p0 !== 0);
+}
+
+function updateGainUI() {
+  els.gainInput.value = String(Number(state.user.gainDB.toFixed(2)));
+  els.gainSignBtn.textContent = state.user.gainSign < 0 ? 'K: −' : 'K: +';
+  els.gainSignBtn.classList.toggle('neg', state.user.gainSign < 0);
+  els.gainLin.textContent = fmtNum(Math.pow(10, state.user.gainDB / 20));
+}
+
+function badgeClass(e) {
+  if (e.kind === 'complex') return e.type === 'zero' ? 'czero' : 'cpole';
+  return e.type;
+}
+
+function updateElemList() {
+  const list = els.elemList;
+  const u = state.user;
+  if (!u.elems.length) {
+    list.innerHTML = '<div class="empty-hint">Nothing placed yet — pick a Zero/Pole tool and click on a plot.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  const sorted = u.elems.slice().sort((a, b) => BM.cornerX(a) - BM.cornerX(b));
+  for (const e of sorted) {
+    const row = document.createElement('div');
+    row.className = 'elem-row' + (e.id === state.selId ? ' selected' : '');
+    row.dataset.id = String(e.id);
+
+    const badge = document.createElement('span');
+    badge.className = 'elem-badge ' + badgeClass(e);
+
+    const type = document.createElement('span');
+    type.className = 'elem-type';
+    type.textContent = (e.kind === 'complex' ? 'c.' : '') + (e.type === 'zero' ? 'zero' : 'pole');
+
+    const wInput = document.createElement('input');
+    wInput.className = 'elem-w';
+    wInput.type = 'text';
+    wInput.spellcheck = false;
+    wInput.value = fmtW(BM.freqOf(e));
+    wInput.title = 'Corner frequency ω [rad/s]';
+    wInput.addEventListener('change', () => {
+      const v = parseFloat(wInput.value);
+      if (!isFinite(v) || v <= 0) { wInput.value = fmtW(BM.freqOf(e)); return; }
+      if (e.kind === 'real') e.w = v; else e.wn = v;
+      setStatus('Moved <b>' + elemLabel(e) + '</b> to ω = <span class="val">' + fmtW(v) + '</span>');
+      updateElemList();
+      render();
+    });
+    wInput.addEventListener('pointerdown', ev => ev.stopPropagation());
+
+    const order = document.createElement('span');
+    order.className = 'order-ctl';
+    const dec = document.createElement('button');
+    dec.className = 'mini'; dec.type = 'button'; dec.textContent = '−';
+    dec.title = 'Lower order (removes when ×1)';
+    dec.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (e.order > 1) { e.order--; setStatus(elemLabel(e) + ' order ×' + e.order); }
+      else { removeElem(e.id); return; }
+      updateElemList(); render();
+    });
+    const n = document.createElement('span');
+    n.className = 'order-n'; n.textContent = '×' + e.order;
+    const inc = document.createElement('button');
+    inc.className = 'mini'; inc.type = 'button'; inc.textContent = '+';
+    inc.title = 'Raise order';
+    inc.addEventListener('click', ev => {
+      ev.stopPropagation();
+      e.order++;
+      setStatus(elemLabel(e) + ' order ×' + e.order + ' · slope ' +
+        (BM.magSlopeUnit(e) * e.order > 0 ? '+' : '−') + Math.abs(BM.magSlopeUnit(e) * e.order) + ' dB/dec');
+      updateElemList(); render();
+    });
+    order.append(dec, n, inc);
+
+    const del = document.createElement('button');
+    del.className = 'elem-del'; del.type = 'button'; del.textContent = '✕';
+    del.title = 'Remove';
+    del.addEventListener('click', ev => { ev.stopPropagation(); removeElem(e.id); });
+
+    row.append(badge, type, wInput, order, del);
+    row.addEventListener('click', () => {
+      state.selId = e.id;
+      setStatus('Selected <b>' + elemLabel(e) + '</b> at ω = <span class="val">' + fmtW(BM.freqOf(e)) + '</span>');
+      updateElemList();
+      render();
+    });
+    list.appendChild(row);
+  }
+}
+
+function updateSidebar() {
+  updateOriginCounts();
+  updateGainUI();
+  updateElemList();
+}
+
+// ---------------------------------------------------------------------------
+// keyboard
+// ---------------------------------------------------------------------------
+function onKeyDown(e) {
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+  const k = e.key.toLowerCase();
+  if (k === 'v') setTool('select');
+  else if (k === 'z') setTool('zero');
+  else if (k === 'p') setTool('pole');
+  else if (k === 'c') setTool('czero');
+  else if (k === 'x') setTool('cpole');
+  else if (k === 'd') setTool('delete');
+  else if (k === 'escape') setTool('select');
+  else if (k === 'delete' || k === 'backspace') { e.preventDefault(); removeSelected(); }
+  else return;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,20 +782,85 @@ function init() {
   els.magCanvas = document.getElementById('magCanvas');
   els.phCanvas = document.getElementById('phCanvas');
   els.status = document.getElementById('status');
+  els.tfInput = document.getElementById('tfInput');
+  els.tfError = document.getElementById('tfError');
+  els.tfOk = document.getElementById('tfOk');
+  els.elemList = document.getElementById('elemList');
+  els.z0Count = document.getElementById('z0Count');
+  els.p0Count = document.getElementById('p0Count');
+  els.gainInput = document.getElementById('gainInput');
+  els.gainSignBtn = document.getElementById('gainSignBtn');
+  els.gainLin = document.getElementById('gainLin');
+  els.lgSolution = document.getElementById('lgSolution');
+  els.lgExact = document.getElementById('lgExact');
+  els.checkResults = document.getElementById('checkResults');
 
   document.querySelectorAll('.tool').forEach(btn => {
     btn.addEventListener('click', () => setTool(btn.dataset.tool));
   });
 
+  document.getElementById('btnLoad').addEventListener('click', loadTF);
+  els.tfInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadTF(); });
+
+  document.getElementById('btnClear').addEventListener('click', clearUser);
+
+  document.getElementById('z0Plus').addEventListener('click', () => {
+    state.user.z0 = clamp(state.user.z0 + 1, 0, 8);
+    setStatus('Zeros at origin: s' + supStr(state.user.z0) + ' → initial slope +' + (20 * state.user.z0) + ' dB/dec');
+    updateSidebar(); render();
+  });
+  document.getElementById('z0Minus').addEventListener('click', () => {
+    state.user.z0 = clamp(state.user.z0 - 1, 0, 8);
+    setStatus('Zeros at origin: s' + supStr(state.user.z0));
+    updateSidebar(); render();
+  });
+  document.getElementById('p0Plus').addEventListener('click', () => {
+    state.user.p0 = clamp(state.user.p0 + 1, 0, 8);
+    setStatus('Poles at origin: 1/s' + supStr(state.user.p0) + ' → initial slope −' + (20 * state.user.p0) + ' dB/dec');
+    updateSidebar(); render();
+  });
+  document.getElementById('p0Minus').addEventListener('click', () => {
+    state.user.p0 = clamp(state.user.p0 - 1, 0, 8);
+    setStatus('Poles at origin: 1/s' + supStr(state.user.p0));
+    updateSidebar(); render();
+  });
+
+  els.gainInput.addEventListener('input', () => {
+    const v = parseFloat(els.gainInput.value);
+    if (isFinite(v)) {
+      state.user.gainDB = clamp(v, -200, 200);
+      els.gainLin.textContent = fmtNum(Math.pow(10, state.user.gainDB / 20));
+      render();
+    }
+  });
+  els.gainInput.addEventListener('change', () => {
+    setStatus('Gain 20 lg|K| = <span class="val">' + fmtNum(state.user.gainDB) + '</span> dB · |K| = <span class="val">' +
+      fmtNum(Math.pow(10, state.user.gainDB / 20)) + '</span>');
+  });
+  els.gainSignBtn.addEventListener('click', () => {
+    state.user.gainSign = state.user.gainSign < 0 ? 1 : -1;
+    updateGainUI();
+    setStatus('Sign of K: <b>' + (state.user.gainSign < 0 ? '− (phase +180°)' : '+') + '</b>');
+    render();
+  });
+
+  bindCanvas(els.magCanvas, 'mag');
+  bindCanvas(els.phCanvas, 'ph');
+  document.addEventListener('keydown', onKeyDown);
+
   const ro = new ResizeObserver(() => resizeAll());
   ro.observe(els.magCanvas.parentElement);
   ro.observe(els.phCanvas.parentElement);
   resizeAll();
-
-  setStatus('Ready — load a transfer function, place poles &amp; zeros, then check your work.');
+  updateSidebar();
+  setTool('select');
 }
 
-window.__bode = { state, setTool, render, resizeAll, setStatus, helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp } };
+window.__bode = {
+  state, setTool, render, resizeAll, setStatus,
+  loadTF, placeAt, removeElem, clearUser, updateSidebar,
+  helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem },
+};
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();
