@@ -135,6 +135,35 @@ function pxToX(px, g) { return state.view.xmin + (px - g.l) / g.w * (state.view.
 function yToPx(y, g, yr) { return g.t + (yr.max - y) / (yr.max - yr.min) * g.h; }
 function pxToY(px, g, yr) { return yr.max - (px - g.t) / g.h * (yr.max - yr.min); }
 
+// Vertical grid lines: bold decades + minor log10(2..9) lines (see drawAxes).
+const GRID_OFFS = [0, Math.log10(2), Math.log10(3), Math.log10(4), Math.log10(5),
+  Math.log10(6), Math.log10(7), Math.log10(8), Math.log10(9)];
+const GRID_TOL = 0.02; // decades — this close to a grid line snaps onto it
+
+function minorGridVisible(plot) {
+  const g = plot === 'ph' ? geom(phW, phH) : geom(magW, magH);
+  const span = state.view.xmax - state.view.xmin;
+  return span <= 16 && g.w / span > 46;
+}
+
+/** Snap a log-frequency to the drawing grid: exactly onto a vertical grid line
+ *  when the click lands on one (the 0.05-decade lattice misses minor lines
+ *  like log10(3) = 0.477…), otherwise onto the 0.05-decade lattice. */
+function snapX(xLog, plot) {
+  if (!isFinite(xLog)) return xLog;
+  const offs = minorGridVisible(plot) ? GRID_OFFS : [0];
+  const k = Math.floor(xLog);
+  let best = null, bestD = GRID_TOL;
+  for (const o of offs) {
+    for (const cand of [k + o, k + 1 + o]) {
+      const d = Math.abs(xLog - cand);
+      if (d < bestD) { bestD = d; best = cand; }
+    }
+  }
+  if (best != null) return best;
+  return Math.round(xLog / 0.05) * 0.05;
+}
+
 // ---------------------------------------------------------------------------
 // axis ticks
 // ---------------------------------------------------------------------------
@@ -348,7 +377,7 @@ function ghostPoints(plot) {
   if (placeTool) {
     const type = (t === 'zero' || t === 'czero') ? 'zero' : 'pole';
     const kind = (t === 'zero' || t === 'pole') ? 'real' : 'complex';
-    xc = hov.free ? hov.xLog : Math.round(hov.xLog / 0.05) * 0.05;
+    xc = hov.free ? hov.xLog : snapX(hov.xLog, plot);
     const ex = u.elems.find(e =>
       e.type === type && e.kind === kind &&
       Math.abs(BM.cornerX(e) - xc) <= 0.025 &&
@@ -574,8 +603,8 @@ function setStatus(html) { els.status.innerHTML = html; }
 // ---------------------------------------------------------------------------
 const TOOL_HINTS = {
   select: 'Select — drag the <b>line</b> for gain · drag a <b>marker</b> for ω · background drag pans · wheel zooms ω',
-  zero: 'Place <b>zero</b> — click a plot (snap 0.05 decade, <b>Ctrl</b> = free) · click again to raise order',
-  pole: 'Place <b>pole</b> — click a plot (snap 0.05 decade, <b>Ctrl</b> = free) · click again to raise order',
+  zero: 'Place <b>zero</b> — click a plot (snaps to a grid line, else 0.05 decade · <b>Ctrl</b> = free) · click again to raise order',
+  pole: 'Place <b>pole</b> — click a plot (snaps to a grid line, else 0.05 decade · <b>Ctrl</b> = free) · click again to raise order',
   czero: 'Place <b>complex zero pair</b> (+40 dB/dec) — click a plot',
   cpole: 'Place <b>complex pole pair</b> (−40 dB/dec) — click a plot',
   delete: 'Delete — click a marker to remove it',
@@ -610,7 +639,7 @@ function placeAt(xLog, free, plot) {
   plot = plot || 'mag';
   const type = (t === 'zero' || t === 'czero') ? 'zero' : 'pole';
   const kind = (t === 'zero' || t === 'pole') ? 'real' : 'complex';
-  const snap = free ? xLog : Math.round(xLog / 0.05) * 0.05;
+  const snap = free ? xLog : snapX(xLog, plot);
   const u = state.user;
   const ex = u.elems.find(e =>
     e.type === type && e.kind === kind &&
@@ -767,14 +796,14 @@ function onDragMove(info, e) {
     const el = state.user.elems.find(x => x.id === d.id);
     if (!el) return;
     const free = e.ctrlKey || e.metaKey;
-    let xLog = free ? info.xLog : Math.round(info.xLog / 0.05) * 0.05;
+    let xLog = free ? info.xLog : snapX(info.xLog, d.plot);
     xLog = clamp(xLog, state.view.xmin, state.view.xmax);
     const w = Math.pow(10, xLog);
     if (el.kind === 'real') el.w = w; else el.wn = w;
     updateElemList();
     showDragTip(e,
       elemLabel(el) + ' → ω = <span class="val">' + fmtW(w) + '</span>' +
-      (free ? ' <span class="val">free</span>' : ' <span class="val">snap 0.05</span>'));
+      (free ? ' <span class="val">free</span>' : ' <span class="val">snap grid</span>'));
   }
   render();
 }
@@ -1462,7 +1491,7 @@ window.__bode = {
   composeExport, exportPng, copyImage, ghostPoints,
   undo, redo, recordHistory, resetHistory,
   updateTfPreview, tfRawExpr, elemOnPlot,
-  helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem },
+  helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem, snapX },
 };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
