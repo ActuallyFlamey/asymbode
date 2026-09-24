@@ -211,31 +211,69 @@ function drawAxes(ctx, w, h, yr, opts) {
 // ---------------------------------------------------------------------------
 // curve drawing
 // ---------------------------------------------------------------------------
+/** Liang–Barsky clip of segment a→b against box; returns [p,q] or null. */
+function clipSeg(a, b, box) {
+  let t0 = 0, t1 = 1;
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const tests = [
+    [-dx, a.x - box.x0],
+    [dx, box.x1 - a.x],
+    [-dy, a.y - box.y0],
+    [dy, box.y1 - a.y],
+  ];
+  for (let i = 0; i < 4; i++) {
+    const p = tests[i][0], q = tests[i][1];
+    if (p === 0) { if (q < 0) return null; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+    else { if (r < t0) return null; if (r < t1) t1 = r; }
+  }
+  const at = (t) => ({ x: a.x + dx * t, y: a.y + dy * t });
+  return [at(t0), at(t1)];
+}
+
 function drawPolyline(ctx, pts, g, yr, color, width, dash) {
   if (!pts || pts.length < 2) return;
-  const span = yr.max - yr.min;
-  const lo = yr.min - span, hi = yr.max + span;
-  const prepped = [];
-  for (const p of pts) {
-    if (!isFinite(p.x) || !isFinite(p.y)) continue;
-    prepped.push({ x: p.x, y: clamp(p.y, lo, hi) });
+  // Project unclamped; clip segments geometrically (clamping vertices would
+  // distort slopes when zoomed out). x is always inside the plot, only y can
+  // explode far off-screen.
+  const box = { x0: g.l - 1, y0: g.t - 1, x1: g.r + 1, y1: g.b + 1 };
+  const proj = new Array(pts.length);
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (!isFinite(p.x) || !isFinite(p.y)) { proj[i] = null; continue; }
+    const x = xToPx(p.x, g), y = yToPx(p.y, g, yr);
+    proj[i] = (isFinite(x) && isFinite(y)) ? { x, y } : null;
   }
-  if (prepped.length < 2) return;
+
   ctx.save();
   ctx.beginPath();
   ctx.rect(g.l, g.t, g.w, g.h);
   ctx.clip();
   ctx.beginPath();
-  prepped.forEach((p, i) => {
-    const px = xToPx(p.x, g), py = yToPx(p.y, g, yr);
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  });
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width || 2;
-  ctx.setLineDash(dash || []);
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.stroke();
+  let prev = null, any = false;
+  for (let i = 0; i < proj.length - 1; i++) {
+    const a = proj[i], b = proj[i + 1];
+    if (!a || !b) { prev = null; continue; }
+    const c = clipSeg(a, b, box);
+    if (!c) { prev = null; continue; }
+    const p = c[0], q = c[1];
+    if (prev && Math.abs(prev.x - p.x) < 0.01 && Math.abs(prev.y - p.y) < 0.01)
+      ctx.lineTo(p.x, p.y);
+    else
+      ctx.moveTo(p.x, p.y);
+    ctx.lineTo(q.x, q.y);
+    prev = q;
+    any = true;
+  }
+  if (any) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width || 2;
+    ctx.setLineDash(dash || []);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
