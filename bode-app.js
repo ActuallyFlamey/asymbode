@@ -368,7 +368,7 @@ function ghostPoints(plot) {
   if (xc < xmin || xc > xmax) return null;
 
   if (plot === 'mag') {
-    const y0 = BM.asymMag(u, xc);
+    const y0 = BM.asymMag(userForPlot('mag'), xc);
     const slope = BM.magSlopeUnit(elem) * elem.order;
     return {
       xc,
@@ -380,7 +380,7 @@ function ghostPoints(plot) {
   // starting from the current phase level where the ramp begins.
   const total = BM.phaseTotal(elem) * elem.order;
   const xa = xc - 1, xb = xc + 1;
-  const y0 = BM.asymPhase(u, xa);
+  const y0 = BM.asymPhase(userForPlot('ph'), xa);
   const rampY = (x) => y0 + total * Math.min(1, Math.max(0, (x - xa) / 2));
   const xs = [Math.max(xmin, xa), xa, xb, xmax]
     .filter(x => x >= xmin && x <= xmax)
@@ -400,7 +400,8 @@ function elemLabel(e) {
 
 function markerPos(e, g, yr, plot) {
   const xc = BM.cornerX(e);
-  const yv = plot === 'mag' ? BM.asymMag(state.user, xc) : BM.asymPhase(state.user, xc);
+  const u = userForPlot(plot);
+  const yv = plot === 'mag' ? BM.asymMag(u, xc) : BM.asymPhase(u, xc);
   return { px: xToPx(xc, g), py: yToPx(yv, g, yr), xc };
 }
 
@@ -525,8 +526,8 @@ function render() {
   drawCrosshair(phCtx, phW, phH, state.yPh, 'ph');
 
   // user asymptotes
-  const mpts = BM.asymMagPoints(state.user, state.view.xmin, state.view.xmax);
-  const ppts = BM.asymPhasePoints(state.user, state.view.xmin, state.view.xmax);
+  const mpts = BM.asymMagPoints(userForPlot('mag'), state.view.xmin, state.view.xmax);
+  const ppts = BM.asymPhasePoints(userForPlot('ph'), state.view.xmin, state.view.xmax);
   drawPolyline(magCtx, mpts, gy, state.yMag, DARK.user, 2.2);
   drawPolyline(phCtx, ppts, gp, state.yPh, DARK.user, 2.2);
 
@@ -593,6 +594,14 @@ function setTool(tool) {
 /** Is this element drawn on `plot`? (missing `plots` = both, pre-sync format) */
 function elemOnPlot(e, plot) {
   return !Array.isArray(e.plots) || e.plots.indexOf(plot) !== -1;
+}
+
+/** state.user with only the elems drawn on `plot` — used for curve math so
+ *  turning mirror off freezes the other graph's asymptote. */
+function userForPlot(plot) {
+  return Object.assign({}, state.user, {
+    elems: (state.user.elems || []).filter(e => elemOnPlot(e, plot)),
+  });
 }
 
 function placeAt(xLog, free, plot) {
@@ -692,12 +701,13 @@ function clearUser() {
 function hitElem(px, py, plot) {
   const g = plot === 'mag' ? geom(magW, magH) : geom(phW, phH);
   const yr = plot === 'mag' ? state.yMag : state.yPh;
+  const u = userForPlot(plot);
   let best = null, bestD = 12;
   for (const e of state.user.elems) {
     if (!elemOnPlot(e, plot)) continue;
     const xc = BM.cornerX(e);
     if (xc < state.view.xmin || xc > state.view.xmax) continue;
-    const yv = plot === 'mag' ? BM.asymMag(state.user, xc) : BM.asymPhase(state.user, xc);
+    const yv = plot === 'mag' ? BM.asymMag(u, xc) : BM.asymPhase(u, xc);
     const ex = xToPx(xc, g), ey = yToPx(yv, g, yr);
     const d = Math.hypot(ex - px, ey - py);
     if (d <= bestD) { bestD = d; best = e; }
@@ -812,19 +822,23 @@ function fitView() {
   state.view.xmax = xmax;
 
   let ymin = Infinity, ymax = -Infinity, pmin = Infinity, pmax = -Infinity;
-  const consider = (st) => {
+  const scanMag = (st) => {
     if (!st) return;
     for (const p of BM.asymMagPoints(st, xmin, xmax)) {
       if (p.y < ymin) ymin = p.y;
       if (p.y > ymax) ymax = p.y;
     }
+  };
+  const scanPh = (st) => {
+    if (!st) return;
     for (const p of BM.asymPhasePoints(st, xmin, xmax)) {
       if (p.y < pmin) pmin = p.y;
       if (p.y > pmax) pmax = p.y;
     }
   };
-  consider(state.user);
-  if (state.showSol) consider(state.tfState);
+  scanMag(userForPlot('mag'));
+  scanPh(userForPlot('ph'));
+  if (state.showSol) { scanMag(state.tfState); scanPh(state.tfState); }
   state.yMag = niceYBounds(isFinite(ymin) ? ymin : -40, isFinite(ymax) ? ymax : 40, false);
   state.yPh = niceYBounds(isFinite(pmin) ? pmin : -225, isFinite(pmax) ? pmax : 225, true);
   setStatus('Fitted view to ω <span class="val">' + fmtW(Math.pow(10, xmin)) + '</span> … <span class="val">' +
@@ -919,7 +933,7 @@ function bindCanvas(canvas, plot) {
     let mode = 'pan';
     if (hit) mode = 'marker';
     else if (plot === 'mag') {
-      const yAt = BM.asymMag(state.user, info.xLog);
+      const yAt = BM.asymMag(userForPlot('mag'), info.xLog);
       const yPx = yToPx(yAt, info.g, state.yMag);
       if (Math.abs(info.py - yPx) <= 7) mode = 'line';
     }
