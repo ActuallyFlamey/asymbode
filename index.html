@@ -30,6 +30,17 @@
 
   <span class="sep"></span>
 
+  <div class="history-tools">
+    <button id="btnUndo" class="btn icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+    </button>
+    <button id="btnRedo" class="btn icon" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>
+    </button>
+  </div>
+
+  <span class="sep"></span>
+
   <button id="btnCheck" class="btn accent" title="Show the true (asymptotic) solution and check your work — hold Ctrl for the real Bode plot">Show solution &amp; Check</button>
   <button id="btnClear" class="btn" title="Clear your drawn poles/zeros and gain (keeps the loaded TF)">Clear</button>
   <button id="btnFit" class="btn" title="Fit axes to all elements (F)">Fit view</button>
@@ -116,7 +127,7 @@
         <li><b>Shift + hover</b> a marker (or just hover while placing) shows its raw power as a dotted line on the plot you're hovering — hidden when the pointer leaves the plot</li>
         <li><b>Drag the line</b> vertically → gain · <b>drag a marker</b> → corner frequency · background drag pans · wheel zooms ω</li>
         <li><b>Ctrl</b> (while the solution is shown) switches it to the real Bode plot</li>
-        <li>Keys: <code>V</code> select · <code>Z</code> zero · <code>P</code> pole · <code>C</code>/<code>X</code> complex · <code>D</code> delete · <code>F</code> fit · <code>Del</code> remove selected · <code>Esc</code> back to select</li>
+        <li>Keys: <code>V</code> select · <code>Z</code> zero · <code>P</code> pole · <code>C</code>/<code>X</code> complex · <code>D</code> delete · <code>F</code> fit · <code>Del</code> remove selected · <code>Esc</code> back to select · <code>Ctrl+Z</code>/<code>Ctrl+Y</code> undo/redo</li>
       </ul>
     </section>
   </aside>

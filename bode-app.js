@@ -39,6 +39,59 @@ let magCtx = null, phCtx = null;
 let magW = 0, magH = 0, phW = 0, phH = 0;
 
 // ---------------------------------------------------------------------------
+// undo / redo — snapshots of the drawing state (the user model only; view,
+// selection and tool are UI state and intentionally not part of history)
+// ---------------------------------------------------------------------------
+const HIST_MAX = 200;
+let hist = [], hIdx = -1;
+
+function histSnap() {
+  return JSON.stringify(state.user);
+}
+function recordHistory() {
+  const s = histSnap();
+  if (hIdx >= 0 && hist[hIdx] === s) return false;
+  hist.length = hIdx + 1;
+  hist.push(s);
+  if (hist.length > HIST_MAX) { hist.shift(); }
+  hIdx = hist.length - 1;
+  updateHistoryButtons();
+  return true;
+}
+function resetHistory() {
+  hist = [histSnap()];
+  hIdx = 0;
+  updateHistoryButtons();
+}
+function restoreHist(s) {
+  state.user = JSON.parse(s);
+  if (state.selId != null && !state.user.elems.some(e => e.id === state.selId))
+    state.selId = null;
+  updateSidebar();
+  render();
+}
+function undo() {
+  if (hIdx <= 0) { setStatus('Nothing to undo'); return false; }
+  hIdx--;
+  restoreHist(hist[hIdx]);
+  updateHistoryButtons();
+  setStatus('Undid last change — <b>Ctrl+Z</b> steps further back · <b>Ctrl+Y</b> redoes');
+  return true;
+}
+function redo() {
+  if (hIdx >= hist.length - 1) { setStatus('Nothing to redo'); return false; }
+  hIdx++;
+  restoreHist(hist[hIdx]);
+  updateHistoryButtons();
+  setStatus('Redid last change — <b>Ctrl+Z</b> undoes again');
+  return true;
+}
+function updateHistoryButtons() {
+  if (els.btnUndo) els.btnUndo.disabled = hIdx <= 0;
+  if (els.btnRedo) els.btnRedo.disabled = hIdx >= hist.length - 1;
+}
+
+// ---------------------------------------------------------------------------
 // formatting helpers
 // ---------------------------------------------------------------------------
 const SUP = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
@@ -560,6 +613,7 @@ function placeAt(xLog, free) {
     ' at ω = <span class="val">' + fmtW(BM.freqOf(elem)) + '</span> rad/s' +
     ' · slope ' + (slope > 0 ? '+' : '−') + Math.abs(slope) + ' dB/dec above the corner'
   );
+  recordHistory();
   updateSidebar();
   render();
   return elem;
@@ -573,6 +627,7 @@ function removeElem(id) {
   u.elems.splice(i, 1);
   if (state.selId === id) state.selId = null;
   setStatus('Removed <b>' + elemLabel(e) + '</b> at ω = <span class="val">' + fmtW(BM.freqOf(e)) + '</span>');
+  recordHistory();
   updateSidebar();
   render();
   return true;
@@ -595,6 +650,7 @@ function clearUser() {
   if (els.lgExact) els.lgExact.hidden = true;
   if (els.checkResults)
     els.checkResults.innerHTML = '<div class="empty-hint">Load a transfer function, draw your asymptote, then press <b>Show solution &amp; Check</b>.</div>';
+  recordHistory();
   setStatus('Cleared your drawing (the loaded transfer function is kept)');
   updateSidebar();
   render();
@@ -702,6 +758,7 @@ function endDrag() {
       if (el)
         setStatus('Moved <b>' + elemLabel(el) + '</b> to ω = <span class="val">' + fmtW(BM.freqOf(el)) + '</span>');
     }
+    if (d.mode === 'line' || d.mode === 'marker') recordHistory();
     updateSidebar();
   }
   render();
@@ -974,6 +1031,7 @@ function updateElemList() {
       if (!isFinite(v) || v <= 0) { wInput.value = fmtW(BM.freqOf(e)); return; }
       if (e.kind === 'real') e.w = v; else e.wn = v;
       setStatus('Moved <b>' + elemLabel(e) + '</b> to ω = <span class="val">' + fmtW(v) + '</span>');
+      recordHistory();
       updateElemList();
       render();
     });
@@ -988,6 +1046,7 @@ function updateElemList() {
       ev.stopPropagation();
       if (e.order > 1) { e.order--; setStatus(elemLabel(e) + ' order ×' + e.order); }
       else { removeElem(e.id); return; }
+      recordHistory();
       updateElemList(); render();
     });
     const n = document.createElement('span');
@@ -1000,6 +1059,7 @@ function updateElemList() {
       e.order++;
       setStatus(elemLabel(e) + ' order ×' + e.order + ' · slope ' +
         (BM.magSlopeUnit(e) * e.order > 0 ? '+' : '−') + Math.abs(BM.magSlopeUnit(e) * e.order) + ' dB/dec');
+      recordHistory();
       updateElemList(); render();
     });
     order.append(dec, n, inc);
@@ -1175,6 +1235,12 @@ function onKeyDown(e) {
   const tag = (e.target && e.target.tagName) || '';
   if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
   if (e.key === 'Control') { setCtrlHeld(true); return; }
+  if (e.ctrlKey || e.metaKey) {
+    const k = e.key.toLowerCase();
+    if (k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+    else if (k === 'y') { e.preventDefault(); redo(); }
+    return;
+  }
   const k = e.key.toLowerCase();
   if (k === 'v') setTool('select');
   else if (k === 'z') setTool('zero');
@@ -1213,6 +1279,8 @@ function init() {
   els.checkResults = document.getElementById('checkResults');
   els.dragTip = document.getElementById('dragTip');
   els.plots = document.querySelector('.plots');
+  els.btnUndo = document.getElementById('btnUndo');
+  els.btnRedo = document.getElementById('btnRedo');
 
   document.querySelectorAll('.tool').forEach(btn => {
     btn.addEventListener('click', () => setTool(btn.dataset.tool));
@@ -1230,22 +1298,22 @@ function init() {
   document.getElementById('z0Plus').addEventListener('click', () => {
     state.user.z0 = clamp(state.user.z0 + 1, 0, 8);
     setStatus('Zeros at origin: s' + supStr(state.user.z0) + ' → initial slope +' + (20 * state.user.z0) + ' dB/dec');
-    updateSidebar(); render();
+    recordHistory(); updateSidebar(); render();
   });
   document.getElementById('z0Minus').addEventListener('click', () => {
     state.user.z0 = clamp(state.user.z0 - 1, 0, 8);
     setStatus('Zeros at origin: s' + supStr(state.user.z0));
-    updateSidebar(); render();
+    recordHistory(); updateSidebar(); render();
   });
   document.getElementById('p0Plus').addEventListener('click', () => {
     state.user.p0 = clamp(state.user.p0 + 1, 0, 8);
     setStatus('Poles at origin: 1/s' + supStr(state.user.p0) + ' → initial slope −' + (20 * state.user.p0) + ' dB/dec');
-    updateSidebar(); render();
+    recordHistory(); updateSidebar(); render();
   });
   document.getElementById('p0Minus').addEventListener('click', () => {
     state.user.p0 = clamp(state.user.p0 - 1, 0, 8);
     setStatus('Poles at origin: 1/s' + supStr(state.user.p0));
-    updateSidebar(); render();
+    recordHistory(); updateSidebar(); render();
   });
 
   els.gainInput.addEventListener('input', () => {
@@ -1257,15 +1325,20 @@ function init() {
     }
   });
   els.gainInput.addEventListener('change', () => {
+    recordHistory();
     setStatus('Gain 20 lg|K| = <span class="val">' + fmtNum(state.user.gainDB) + '</span> dB · |K| = <span class="val">' +
       fmtNum(Math.pow(10, state.user.gainDB / 20)) + '</span>');
   });
   els.gainSignBtn.addEventListener('click', () => {
     state.user.gainSign = state.user.gainSign < 0 ? 1 : -1;
+    recordHistory();
     updateGainUI();
     setStatus('Sign of K: <b>' + (state.user.gainSign < 0 ? '− (phase +180°)' : '+') + '</b>');
     render();
   });
+
+  els.btnUndo.addEventListener('click', undo);
+  els.btnRedo.addEventListener('click', redo);
 
   bindCanvas(els.magCanvas, 'mag');
   bindCanvas(els.phCanvas, 'ph');
@@ -1281,6 +1354,7 @@ function init() {
   resizeAll();
   updateSidebar();
   setTool('select');
+  resetHistory();
 }
 
 window.__bode = {
@@ -1288,6 +1362,7 @@ window.__bode = {
   loadTF, placeAt, removeElem, clearUser, updateSidebar, fitView,
   showSolutionAndCheck, setCtrlHeld, updateLegend,
   composeExport, exportPng, copyImage, ghostPoints,
+  undo, redo, recordHistory, resetHistory,
   helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem },
 };
 

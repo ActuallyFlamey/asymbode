@@ -98,6 +98,17 @@ body {
 .btn.accent:hover { background: #352b64; }
 .btn.active { background: #2b2350; border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent2) inset; }
 
+.btn.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+}
+.btn.icon svg { display: block; }
+.btn.icon:disabled { opacity: .38; cursor: default; }
+.btn.icon:disabled:hover { background: var(--panel2); border-color: var(--border2); }
+.history-tools { display: flex; gap: 4px; }
+
 .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
 
 .tools { display: flex; gap: 4px; }
