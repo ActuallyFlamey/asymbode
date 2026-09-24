@@ -775,6 +775,41 @@ function clusterElems(elems, gapDec) {
 }
 
 /**
+ * With graph mirroring off, the same intended element may be drawn separately
+ * on the magnitude and phase graphs (two entries with disjoint `plots`).
+ * Fold those into one before clustering so the checker doesn't see a phantom
+ * order increase or an extra element. Entries that share a graph are left
+ * untouched (near-duplicate orders there are summed by clusterElems as before).
+ */
+function coalesceMirrored(elems) {
+  const out = [];
+  for (const e of elems) {
+    const pa = Array.isArray(e.plots) ? e.plots : null;
+    if (pa && pa.length === 0) continue;
+    let m = null;
+    for (const o of out) {
+      if (o.type !== e.type || o.kind !== e.kind || !!o.rhp !== !!e.rhp) continue;
+      const wo = freqOf(o), we = freqOf(e);
+      if (Math.abs(wo - we) > 1e-9 * Math.max(wo, we)) continue;
+      const pb = Array.isArray(o.plots) ? o.plots : null;
+      if (!pa || !pb) continue;
+      if (pa.some(p => pb.indexOf(p) !== -1)) continue;
+      m = o;
+      break;
+    }
+    if (m) {
+      m.order = Math.max(m.order, e.order);
+      for (const p of e.plots) if (m.plots.indexOf(p) === -1) m.plots.push(p);
+    } else {
+      const copy = Object.assign({}, e);
+      if (Array.isArray(e.plots)) copy.plots = e.plots.slice();
+      out.push(copy);
+    }
+  }
+  return out;
+}
+
+/**
  * Compare a user drawing against the true TF.
  * Returns { items: [{ok, kind, text}], score: {ok, total} }.
  */
@@ -814,7 +849,7 @@ function checkSolution(tf, user, opts) {
 
   // --- finite elements, clustered so split double-poles still match ---
   const tCl = clusterElems(trueState.elems, 0.026);
-  const uCl = clusterElems(user.elems || [], 0.026);
+  const uCl = clusterElems(coalesceMirrored(user.elems || []), 0.026);
   const used = new Array(uCl.length).fill(false);
 
   const label = (c) => {
@@ -1373,6 +1408,36 @@ function selfTest() {
   r = checkSolution(tf, t5);
   ok(r.items.every(it => it.ok), 'check: negative K perfect', JSON.stringify(r.items.filter(i => !i.ok)));
 
+  // ---- graph-mirroring off: same element drawn separately per graph ----
+  tf = parseTransferFunction('1/(1+s/10)');
+  const tMir = stateFromTF(tf);
+  const splitPlots = JSON.parse(JSON.stringify(tMir));
+  splitPlots.elems = splitPlots.elems.map(e => Object.assign({}, e, { plots: ['mag'] }))
+    .concat(tMir.elems.map(e => Object.assign({}, e, { plots: ['ph'] })));
+  r = checkSolution(tf, splitPlots);
+  ok(r.items.every(it => it.ok), 'check: mirrored split drawing scores perfect',
+     JSON.stringify(r.items.filter(i => !i.ok)));
+  const coal = coalesceMirrored(splitPlots.elems);
+  ok(coal.length === 1 && coal[0].order === 1, 'coalesce: folds disjoint-plot twins',
+     'len=' + coal.length + ' order=' + (coal[0] && coal[0].order));
+  ok(coal[0].plots.length === 2, 'coalesce: unions plots');
+  // same-graph duplicates must still sum orders (pre-existing behaviour)
+  const sameGraph = [
+    { type: 'pole', kind: 'real', w: 10, order: 1, plots: ['mag'] },
+    { type: 'pole', kind: 'real', w: 10, order: 1, plots: ['mag'] },
+  ];
+  const cSame = coalesceMirrored(sameGraph);
+  ok(cSame.length === 2, 'coalesce: same-graph twins stay separate', 'len=' + cSame.length);
+  const clSame = clusterElems(cSame, 0.026);
+  ok(clSame.length === 1 && clSame[0].order === 2, 'coalesce: same-graph orders still sum',
+     'len=' + clSame.length + ' order=' + (clSame[0] && clSame[0].order));
+  // mag-only drawing (not mirrored on phase) still counts as the element
+  const magOnly = JSON.parse(JSON.stringify(tMir));
+  magOnly.elems = magOnly.elems.map(e => Object.assign({}, e, { plots: ['mag'] }));
+  r = checkSolution(tf, magOnly);
+  ok(r.items.every(it => it.ok), 'check: single-graph drawing still perfect',
+     JSON.stringify(r.items.filter(i => !i.ok)));
+
   // ---- misc helpers ----
   near(Math.log10(1000), 3, 1e-12, 'log10 sanity');
   ok(fmtW(1e4).indexOf('10') === 0, 'fmtW uses power form', fmtW(1e4));
@@ -1438,7 +1503,7 @@ const BodeMath = {
   stateFromTF, checkSolution,
   freqOf, cornerX, magSlopeUnit, phaseTotal,
   polyTrim, polyMul, polyAdd, rootsOf,
-  texPreview,
+  texPreview, coalesceMirrored,
   selfTest,
 };
 

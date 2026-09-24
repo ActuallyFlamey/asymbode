@@ -14,6 +14,7 @@ const state = {
   tool: 'select',
   hover: null,                           // {plot, px, py, xLog, yVal, elemId, shift, free}
   user: { gainDB: 0, gainSign: 1, z0: 0, p0: 0, elems: [] },
+  syncPlots: true,                       // mirror placements/edits between graphs
   selId: null,
   nextId: 1,
   tf: null,                              // parsed truth TF
@@ -46,7 +47,7 @@ const HIST_MAX = 200;
 let hist = [], hIdx = -1;
 
 function histSnap() {
-  return JSON.stringify(state.user);
+  return JSON.stringify({ u: state.user, s: state.syncPlots });
 }
 function recordHistory() {
   const s = histSnap();
@@ -64,7 +65,10 @@ function resetHistory() {
   updateHistoryButtons();
 }
 function restoreHist(s) {
-  state.user = JSON.parse(s);
+  const o = JSON.parse(s);
+  state.user = o.u;
+  state.syncPlots = o.s !== false;
+  if (els.syncToggle) els.syncToggle.checked = state.syncPlots;
   if (state.selId != null && !state.user.elems.some(e => e.id === state.selId))
     state.selId = null;
   updateSidebar();
@@ -347,13 +351,14 @@ function ghostPoints(plot) {
     xc = hov.free ? hov.xLog : Math.round(hov.xLog / 0.05) * 0.05;
     const ex = u.elems.find(e =>
       e.type === type && e.kind === kind &&
-      Math.abs(BM.cornerX(e) - xc) <= 0.025);
+      Math.abs(BM.cornerX(e) - xc) <= 0.025 &&
+      elemOnPlot(e, plot));
     const order = ex ? ex.order + 1 : 1;
     elem = kind === 'complex'
       ? { type, kind: 'complex', wn: 1, zeta: 0.5, order }
       : { type, kind: 'real', w: 1, order };
   } else if (hov.shift && hov.elemId != null) {
-    const e = u.elems.find(el => el.id === hov.elemId);
+    const e = u.elems.find(el => el.id === hov.elemId && elemOnPlot(el, plot));
     if (!e) return null;
     elem = e;
     xc = BM.cornerX(e);
@@ -475,6 +480,7 @@ function drawMarkers(ctx, w, h, yr, plot) {
   ctx.rect(g.l, g.t, g.w, g.h);
   ctx.clip();
   for (const e of state.user.elems) {
+    if (!elemOnPlot(e, plot)) continue;
     const xc = BM.cornerX(e);
     if (xc < state.view.xmin || xc > state.view.xmax) continue;
     const { px, py } = markerPos(e, g, yr, plot);
@@ -584,25 +590,34 @@ function setTool(tool) {
 // ---------------------------------------------------------------------------
 // user model actions
 // ---------------------------------------------------------------------------
-function placeAt(xLog, free) {
+/** Is this element drawn on `plot`? (missing `plots` = both, pre-sync format) */
+function elemOnPlot(e, plot) {
+  return !Array.isArray(e.plots) || e.plots.indexOf(plot) !== -1;
+}
+
+function placeAt(xLog, free, plot) {
   const t = state.tool;
   if (t !== 'zero' && t !== 'pole' && t !== 'czero' && t !== 'cpole') return null;
+  plot = plot || 'mag';
   const type = (t === 'zero' || t === 'czero') ? 'zero' : 'pole';
   const kind = (t === 'zero' || t === 'pole') ? 'real' : 'complex';
   const snap = free ? xLog : Math.round(xLog / 0.05) * 0.05;
   const u = state.user;
   const ex = u.elems.find(e =>
     e.type === type && e.kind === kind &&
-    Math.abs(BM.cornerX(e) - snap) <= 0.025);
+    Math.abs(BM.cornerX(e) - snap) <= 0.025 &&
+    elemOnPlot(e, plot));
 
   let elem;
   if (ex) {
     ex.order++;
     elem = ex;
+    if (state.syncPlots) elem.plots = ['mag', 'ph'];
   } else {
     elem = kind === 'real'
       ? { id: state.nextId++, type, kind: 'real', w: Math.pow(10, snap), order: 1 }
       : { id: state.nextId++, type, kind: 'complex', wn: Math.pow(10, snap), zeta: 0.5, order: 1 };
+    elem.plots = state.syncPlots ? ['mag', 'ph'] : [plot];
     u.elems.push(elem);
   }
   state.selId = elem.id;
@@ -611,7 +626,8 @@ function placeAt(xLog, free) {
   setStatus(
     (ex ? 'Raised ' : 'Placed ') + '<b>' + elemLabel(elem) + '</b> ×' + elem.order +
     ' at ω = <span class="val">' + fmtW(BM.freqOf(elem)) + '</span> rad/s' +
-    ' · slope ' + (slope > 0 ? '+' : '−') + Math.abs(slope) + ' dB/dec above the corner'
+    ' · slope ' + (slope > 0 ? '+' : '−') + Math.abs(slope) + ' dB/dec above the corner' +
+    (state.syncPlots ? '' : ' · on the ' + (plot === 'mag' ? 'magnitude' : 'phase') + ' graph only')
   );
   recordHistory();
   updateSidebar();
@@ -619,11 +635,25 @@ function placeAt(xLog, free) {
   return elem;
 }
 
-function removeElem(id) {
+function removeElem(id, plot) {
   const u = state.user;
   const i = u.elems.findIndex(e => e.id === id);
   if (i < 0) return false;
   const e = u.elems[i];
+  // mirroring off + element lives on both graphs + removed from one plot
+  // → strip that plot only; the element stays where it is still drawn
+  if (plot && !state.syncPlots && Array.isArray(e.plots) && e.plots.length > 1) {
+    const j = e.plots.indexOf(plot);
+    if (j !== -1) {
+      e.plots.splice(j, 1);
+      setStatus('Removed <b>' + elemLabel(e) + '</b> from the ' +
+        (plot === 'mag' ? 'magnitude' : 'phase') + ' graph only');
+      recordHistory();
+      updateSidebar();
+      render();
+      return true;
+    }
+  }
   u.elems.splice(i, 1);
   if (state.selId === id) state.selId = null;
   setStatus('Removed <b>' + elemLabel(e) + '</b> at ω = <span class="val">' + fmtW(BM.freqOf(e)) + '</span>');
@@ -664,6 +694,7 @@ function hitElem(px, py, plot) {
   const yr = plot === 'mag' ? state.yMag : state.yPh;
   let best = null, bestD = 12;
   for (const e of state.user.elems) {
+    if (!elemOnPlot(e, plot)) continue;
     const xc = BM.cornerX(e);
     if (xc < state.view.xmin || xc > state.view.xmax) continue;
     const yv = plot === 'mag' ? BM.asymMag(state.user, xc) : BM.asymPhase(state.user, xc);
@@ -863,13 +894,13 @@ function bindCanvas(canvas, plot) {
     const t = state.tool;
 
     if (t === 'zero' || t === 'pole' || t === 'czero' || t === 'cpole') {
-      placeAt(info.xLog, e.ctrlKey || e.metaKey);
+      placeAt(info.xLog, e.ctrlKey || e.metaKey, plot);
       updateHover(canvas, plot, e);
       return;
     }
     if (t === 'delete') {
       const hitD = hitElem(info.px, info.py, plot);
-      if (hitD) removeElem(hitD.id);
+      if (hitD) removeElem(hitD.id, plot);
       else setStatus('Nothing to delete there');
       updateHover(canvas, plot, e);
       return;
@@ -1032,6 +1063,15 @@ function updateElemList() {
     const type = document.createElement('span');
     type.className = 'elem-type';
     type.textContent = (e.kind === 'complex' ? 'c.' : '') + (e.type === 'zero' ? 'zero' : 'pole');
+    if (Array.isArray(e.plots) && e.plots.length < 2) {
+      const only = e.plots[0];
+      const tag = document.createElement('span');
+      tag.className = 'plot-tag ' + (only === 'mag' ? 'mag' : 'ph');
+      tag.textContent = only === 'mag' ? 'mag' : 'φ';
+      tag.title = 'Only on the ' + (only === 'mag' ? 'magnitude' : 'phase') + ' graph';
+      type.appendChild(tag);
+      row.title = 'Drawn on the ' + (only === 'mag' ? 'magnitude' : 'phase') + ' graph only';
+    }
 
     const wInput = document.createElement('input');
     wInput.className = 'elem-w';
@@ -1296,6 +1336,7 @@ function init() {
   els.plots = document.querySelector('.plots');
   els.btnUndo = document.getElementById('btnUndo');
   els.btnRedo = document.getElementById('btnRedo');
+  els.syncToggle = document.getElementById('syncToggle');
 
   document.querySelectorAll('.tool').forEach(btn => {
     btn.addEventListener('click', () => setTool(btn.dataset.tool));
@@ -1359,6 +1400,22 @@ function init() {
   els.btnUndo.addEventListener('click', undo);
   els.btnRedo.addEventListener('click', redo);
 
+  if (els.syncToggle) {
+    els.syncToggle.checked = state.syncPlots;
+    els.syncToggle.addEventListener('change', () => {
+      state.syncPlots = els.syncToggle.checked;
+      if (state.syncPlots) {
+        for (const e of state.user.elems) e.plots = ['mag', 'ph'];
+        setStatus('Mirror edits <b>on</b> — poles/zeros now appear on both graphs at once');
+      } else {
+        setStatus('Mirror edits <b>off</b> — new poles/zeros stay on the graph you place them on');
+      }
+      recordHistory();
+      updateSidebar();
+      render();
+    });
+  }
+
   bindCanvas(els.magCanvas, 'mag');
   bindCanvas(els.phCanvas, 'ph');
   bindWheel(els.magCanvas, 'mag');
@@ -1382,7 +1439,7 @@ window.__bode = {
   showSolutionAndCheck, setCtrlHeld, updateLegend,
   composeExport, exportPng, copyImage, ghostPoints,
   undo, redo, recordHistory, resetHistory,
-  updateTfPreview, tfRawExpr,
+  updateTfPreview, tfRawExpr, elemOnPlot,
   helpers: { geom, xToPx, pxToX, yToPx, pxToY, fmtNum, fmtDecade, supStr, niceYBounds, clamp, hitElem },
 };
 

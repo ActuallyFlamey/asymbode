@@ -353,6 +353,71 @@ body {
 #gainSignBtn.neg { color: var(--amber); border-color: var(--amber); }
 .gain-hint { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
 
+/* mirror-edits toggle */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-row input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-switch {
+  width: 30px;
+  height: 16px;
+  border-radius: 9px;
+  background: var(--panel2);
+  border: 1px solid var(--border2);
+  position: relative;
+  flex: none;
+  transition: background .15s, border-color .15s;
+}
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform .15s, background .15s;
+}
+.toggle-row input:checked + .toggle-switch {
+  background: #163246;
+  border-color: var(--accent);
+}
+.toggle-row input:checked + .toggle-switch::after {
+  transform: translateX(14px);
+  background: var(--accent);
+}
+.toggle-row input:focus-visible + .toggle-switch {
+  box-shadow: 0 0 0 2px rgba(79, 195, 247, .35);
+}
+.toggle-label { font-size: 12.5px; color: var(--text); }
+
+/* per-graph plot tag on an element row */
+.plot-tag {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 15px;
+  border-radius: 3px;
+  background: var(--panel);
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  vertical-align: middle;
+}
+.plot-tag.mag { color: var(--accent); }
+.plot-tag.ph { color: var(--accent2); }
+
 /* elements list */
 .elem-list { display: flex; flex-direction: column; gap: 5px; max-height: 240px; overflow-y: auto; }
 .empty-hint { color: var(--muted); font-size: 12px; font-style: italic; }
