@@ -86,7 +86,7 @@ function bindCanvas(canvasEl, plot) {
             setStatus('Selected <b>' + A.elemLabel(hit) + '</b> ×' + hit.order +
                 ' at ω = <span class="val">' + fmtW(BM.freqOf(hit)) + '</span> — drag to move, <b>Del</b> to remove');
         else
-            setStatus('Background — drag to pan · wheel zooms ω · scroll on an axis to scale it');
+            setStatus('Background — drag to pan · wheel zooms the view · scroll on an axis to scale it');
         A.updateSidebar();
 
         let mode = 'pan';
@@ -113,9 +113,8 @@ function bindCanvas(canvasEl, plot) {
     });
 }
 
-function statusX(v, isView) {
-    return (isView ? 'Zoom ω ' : 'ω axis ') +
-        '<span class="val">' + fmtW(Math.pow(10, v.xmin)) + '</span> … <span class="val">' +
+function statusX(v) {
+    return 'ω axis <span class="val">' + fmtW(Math.pow(10, v.xmin)) + '</span> … <span class="val">' +
         fmtW(Math.pow(10, v.xmax)) + '</span> rad/s';
 }
 
@@ -127,15 +126,24 @@ function statusY(v, plot) {
         fmtNum(v.max) + '</span>°';
 }
 
+function statusView(v, plot) {
+    const yr = plot === 'mag' ? v.ys[0] : v.ys[1];
+    const lo = plot === 'mag' ? fmtNum(yr.min, 3) : fmtNum(yr.min);
+    const hi = plot === 'mag' ? fmtNum(yr.max, 3) : fmtNum(yr.max);
+    const unit = plot === 'mag' ? ' dB' : '°';
+    return 'Zoom view — ω <span class="val">' + fmtW(Math.pow(10, v.view.xmin)) + '</span> … <span class="val">' +
+        fmtW(Math.pow(10, v.view.xmax)) + '</span> rad/s · <span class="val">' + lo + '</span> … <span class="val">' +
+        hi + '</span>' + unit;
+}
+
 /** Scale the ω window about the cursor; no-op when the span limits say no. */
-function zoomX(info, f, isView) {
+function zoomX(info, f) {
     const xc = A.clamp(info.xLog, state.view.xmin, state.view.xmax);
     const v = A.scaleX(state.view, xc, f);
     if (!v) return false;
-    state.view.xmin = v.xmin;
-    state.view.xmax = v.xmax;
+    Object.assign(state.view, v);
     A.render();
-    setStatus(statusX(v, isView));
+    setStatus(statusX(v));
     return true;
 }
 
@@ -145,10 +153,27 @@ function zoomY(info, plot, f) {
     const yc = A.clamp(info.yVal, yr.min, yr.max);
     const v = A.scaleY(yr, yc, f);
     if (!v) return false;
-    yr.min = v.min;
-    yr.max = v.max;
+    Object.assign(yr, v);
     A.render();
     setStatus(statusY(v, plot));
+    return true;
+}
+
+/**
+ * Zoom the view: ω and both y windows scale by the same factor about the
+ * cursor, so the whole drawing magnifies instead of only the ω axis.
+ */
+function zoomView(info, plot, f) {
+    const xc = A.clamp(info.xLog, state.view.xmin, state.view.xmax);
+    const anchors = [state.yMag, state.yPh].map(yr =>
+        A.clamp(A.pxToY(info.py, info.g, yr), yr.min, yr.max));
+    const v = A.scaleView(state.view, [state.yMag, state.yPh], xc, anchors, f);
+    if (!v) return false;
+    Object.assign(state.view, v.view);
+    Object.assign(state.yMag, v.ys[0]);
+    Object.assign(state.yPh, v.ys[1]);
+    A.render();
+    setStatus(statusView(v, plot));
     return true;
 }
 
@@ -160,7 +185,8 @@ function bindWheel(canvasEl, plot) {
         if (!f) return;
         const target = A.wheelTarget(info.px, info.py, info.g);
         if (target === 'y') zoomY(info, plot, f);
-        else zoomX(info, f, target === 'view');   // 'x' strip and the plot itself
+        else if (target === 'x') zoomX(info, f);
+        else zoomView(info, plot, f);
     }, { passive: false });
 }
 

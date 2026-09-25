@@ -36,6 +36,27 @@ function scaleY(yr, anchorY, f) {
     return scaleAbout(yr.min, yr.max, anchorY, f, Y_SPAN);
 }
 
+/**
+ * Uniform "zoom the view": the ω window and every y window (`ys`) scale by
+ * the same factor about their anchors, so the drawing magnifies like an image
+ * and the curve slopes keep their visual angle. All-or-nothing — null when
+ * any window would leave its span limits.
+ *
+ * Returns { view: {xmin,xmax}, ys: [{min,max}, …] }; the caller copies the
+ * results back into state.
+ */
+function scaleView(view, ys, anchorX, anchorsY, f) {
+    const x = scaleX(view, anchorX, f);
+    if (!x) return null;
+    const out = [];
+    for (let i = 0; i < ys.length; i++) {
+        const y = scaleY(ys[i], anchorsY[i], f);
+        if (!y) return null;
+        out.push(y);
+    }
+    return { view: x, ys: out };
+}
+
 /** Zoom factor of one wheel notch; null for a horizontal-only scroll. */
 function wheelFactor(deltaY) {
     if (!deltaY || !isFinite(deltaY)) return null;
@@ -59,6 +80,7 @@ A.ZOOM_STEP = STEP;
 A.scaleAbout = scaleAbout;
 A.scaleX = scaleX;
 A.scaleY = scaleY;
+A.scaleView = scaleView;
 A.wheelFactor = wheelFactor;
 A.wheelTarget = wheelTarget;
 

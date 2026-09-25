@@ -6,7 +6,7 @@
 'use strict';
 
 const state = A.state;
-const { geom, xToPx, pxToX, yToPx, pxToY, wheelTarget, wheelFactor, scaleX, scaleY } = A;
+const { geom, xToPx, pxToX, yToPx, pxToY, wheelTarget, wheelFactor, scaleX, scaleY, scaleView } = A;
 
 function selfTest() {
     const failures = [];
@@ -81,6 +81,39 @@ function selfTest() {
     ok(scaleY({ min: 0, max: 3600 }, 0, 1.12) === null, 'scaleY: refuses over 3600');
     ok(scaleY({ min: 0, max: 3000 }, 0, 1.12) !== null, 'scaleY: 3000 may zoom out');
     ok(scaleY(yr0, 0, 0) === null, 'scaleY: zero factor rejected');
+
+    // ---- uniform view zoom (ω + every y window move together) ----
+    const v3 = { xmin: -3, xmax: 3 };
+    const y3 = [{ min: -40, max: 40 }, { min: -225, max: 225 }];
+    const sv = scaleView(v3, y3, -1, [10, 30], 0.5);
+    ok(!!sv, 'scaleView: result within limits');
+    if (sv) {
+        near(sv.view.xmax - sv.view.xmin, 3, 1e-9, 'scaleView: ω span halves',
+            JSON.stringify(sv.view));
+        near(sv.ys[0].max - sv.ys[0].min, 40, 1e-9, 'scaleView: magnitude span halves',
+            JSON.stringify(sv.ys[0]));
+        near(sv.ys[1].max - sv.ys[1].min, 225, 1e-9, 'scaleView: phase span halves',
+            JSON.stringify(sv.ys[1]));
+        near((sv.view.xmax - sv.view.xmin) / 6, (sv.ys[0].max - sv.ys[0].min) / 80, 1e-12,
+            'scaleView: ω and magnitude scale alike');
+        near((sv.ys[1].max - sv.ys[1].min) / 450, (sv.view.xmax - sv.view.xmin) / 6, 1e-12,
+            'scaleView: ω and phase scale alike');
+        near((-1 - sv.view.xmin) / (sv.view.xmax - sv.view.xmin), (-1 - v3.xmin) / (v3.xmax - v3.xmin),
+            1e-12, 'scaleView: ω anchor holds');
+        near((10 - sv.ys[0].min) / (sv.ys[0].max - sv.ys[0].min), (10 - y3[0].min) / (y3[0].max - y3[0].min),
+            1e-12, 'scaleView: magnitude anchor holds');
+        near((30 - sv.ys[1].min) / (sv.ys[1].max - sv.ys[1].min), (30 - y3[1].min) / (y3[1].max - y3[1].min),
+            1e-12, 'scaleView: phase anchor holds');
+    }
+    ok(v3.xmin === -3 && y3[0].min === -40 && y3[1].min === -225, 'scaleView: inputs left untouched');
+    ok(scaleView(v3, y3, 0, [0, 0], 1.12) !== null, 'scaleView: zoom-out within limits');
+    ok(scaleView(v3, y3, 0, [0, 0], 0) === null, 'scaleView: zero factor rejected');
+    ok(scaleView({ xmin: 0, xmax: A.X_SPAN.min }, y3, 0, [0, 0], 0.5) === null,
+        'scaleView: all-or-nothing when ω is at its limit');
+    ok(scaleView(v3, [{ min: 0, max: A.Y_SPAN.min }, { min: -225, max: 225 }], 0, [2, 0], 0.5) === null,
+        'scaleView: all-or-nothing when a y window is at its limit');
+    ok(scaleView(v3, [{ min: -40, max: 40 }, { min: 0, max: A.Y_SPAN.max }], 0, [0, 0], 1.12) === null,
+        'scaleView: all-or-nothing when any y window is at its limit');
 
     // ---- the wheel handler, end to end on a stubbed canvas ----
     const savedState = JSON.stringify({ v: state.view, m: state.yMag, p: state.yPh });
@@ -173,28 +206,46 @@ function selfTest() {
         ok(spanY(state.yMag) === 80, 'ph y strip leaves the magnitude axis alone');
         ok(status().indexOf('Phase axis') === 0, 'phase strip reports the phase axis', status());
 
-        // plot body: ω zoom, y untouched (feature 1 — unchanged from before)
+        // plot body: uniform view zoom — ω and both y windows move together
         fresh();
+        const sx0 = spanX(), sy0 = spanY(state.yMag), sp0 = spanY(state.yPh);
         ok(wheel(mag, 300, 200, -100) === true, 'wheel: prevented over the plot');
-        ok(spanX() < 6, 'plot wheel zooms ω in', 'span ' + spanX());
-        ok(spanY(state.yMag) === 80 && spanY(state.yPh) === 450, 'plot wheel leaves both y axes untouched');
-        ok(status().indexOf('Zoom ω') === 0, 'plot wheel reports the ω zoom', status());
+        const notch = 1 / 1.12;
+        near(spanX() / sx0, notch, 1e-9, 'plot wheel scales ω by one notch', 'span ' + spanX());
+        near(spanY(state.yMag) / sy0, notch, 1e-9, 'plot wheel scales the magnitude axis with ω');
+        near(spanY(state.yPh) / sp0, notch, 1e-9, 'plot wheel scales the phase axis with ω');
+        ok(status().indexOf('Zoom view') === 0, 'plot wheel reports the view zoom', status());
+
+        // the same on the phase graph
+        fresh();
+        wheel(ph, 300, 200, -100);
+        ok(spanX() < 6 && spanY(state.yMag) < 80 && spanY(state.yPh) < 450,
+            'ph plot wheel zooms the whole view',
+            JSON.stringify([spanX(), spanY(state.yMag), spanY(state.yPh)]));
 
         // the data point under the cursor stays put while zooming
         fresh();
-        const anchorX = pxToX(400, g);
-        const fracBefore = (anchorX - state.view.xmin) / spanX();
-        wheel(mag, 400, 200, -100);
-        const fracAfter = (anchorX - state.view.xmin) / spanX();
-        near(fracAfter, fracBefore, 1e-9, 'plot wheel is anchored on the cursor (ω)');
+        const ax = pxToX(400, g);
+        const ayM = pxToY(300, g, state.yMag);
+        const ayP = pxToY(300, g, state.yPh);
+        const fx0 = (ax - state.view.xmin) / spanX();
+        const fy0 = (ayM - state.yMag.min) / spanY(state.yMag);
+        const fp0 = (ayP - state.yPh.min) / spanY(state.yPh);
+        wheel(mag, 400, 300, -100);
+        near((ax - state.view.xmin) / spanX(), fx0, 1e-9, 'plot wheel is anchored on the cursor (ω)');
+        near((ayM - state.yMag.min) / spanY(state.yMag), fy0, 1e-9,
+            'plot wheel is anchored on the cursor (dB)');
+        near((ayP - state.yPh.min) / spanY(state.yPh), fp0, 1e-9,
+            'plot wheel is anchored on the cursor (°)');
         fresh();
-        const anchorY = pxToY(300, g, state.yMag);
-        const yFracBefore = (anchorY - state.yMag.min) / spanY(state.yMag);
+        const yAnchor = pxToY(300, g, state.yMag);
+        const yFracBefore = (yAnchor - state.yMag.min) / spanY(state.yMag);
         wheel(mag, 20, 300, -100);
-        const yFracAfter = (anchorY - state.yMag.min) / spanY(state.yMag);
-        near(yFracAfter, yFracBefore, 1e-9, 'strip wheel is anchored on the cursor (y)');
+        near((yAnchor - state.yMag.min) / spanY(state.yMag), yFracBefore, 1e-9,
+            'strip wheel is anchored on the cursor (y)');
+        ok(spanX() === 6, 'strip wheel leaves ω untouched');
 
-        // horizontal-only scrolls and out-of-plot coordinates do nothing
+        // horizontal-only scrolls do nothing
         fresh();
         ok(wheel(mag, 300, 200, 0) === true, 'wheel: still prevented for a horizontal scroll');
         ok(renders === 0 && spanX() === 6, 'horizontal-only scroll changes nothing', String(renders));
@@ -203,7 +254,9 @@ function selfTest() {
         fresh();
         state.view.xmin = 0; state.view.xmax = A.X_SPAN.min;
         wheel(mag, 300, 200, -100);
-        ok(spanX() === A.X_SPAN.min, 'ω zoom stops at the minimum span', 'span ' + spanX());
+        ok(spanX() === A.X_SPAN.min && spanY(state.yMag) === 80 && spanY(state.yPh) === 450,
+            'view zoom stops with ω at the minimum span and moves nothing else',
+            JSON.stringify([spanX(), spanY(state.yMag), spanY(state.yPh)]));
         wheel(mag, 300, 380, -100);
         ok(spanX() === A.X_SPAN.min, 'ω strip zoom stops at the minimum span', 'span ' + spanX());
         fresh();
@@ -215,6 +268,13 @@ function selfTest() {
         wheel(mag, 20, 200, -100);
         ok(spanY(state.yMag) === A.Y_SPAN.min, 'y strip zoom stops at the minimum span',
             'span ' + spanY(state.yMag));
+        // a pinned window halts the whole view zoom (all-or-nothing)
+        fresh();
+        state.yMag.min = 0; state.yMag.max = A.Y_SPAN.min;
+        wheel(mag, 300, 200, -100);
+        ok(spanX() === 6 && spanY(state.yMag) === A.Y_SPAN.min && spanY(state.yPh) === 450,
+            'a pinned y window stops the whole view zoom',
+            JSON.stringify([spanX(), spanY(state.yMag), spanY(state.yPh)]));
         fresh();
         state.yMag.min = 0; state.yMag.max = A.Y_SPAN.max;
         wheel(mag, 20, 200, 100);

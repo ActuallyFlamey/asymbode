@@ -143,14 +143,17 @@ async function main() {
         ok(Math.abs(s.x - 6) < 1e-9 && Math.abs(s.mag - 80) < 1e-9 && Math.abs(s.ph - 450) < 1e-9,
             'initial view is the default one', JSON.stringify(s));
 
-        // --- plot body: zooms ω, leaves both y windows alone ---
+        // --- plot body: uniform view zoom (ω and both y windows together) ---
         await reset();
         let r = await wheel('magCanvas', geo.w / 2, geo.h / 2, -100);
         ok(r.delivered === false, 'plot wheel calls preventDefault', JSON.stringify(r));
         s = await spans();
+        const notch = 1 / 1.12;
         ok(s.x < 6, 'plot wheel zooms ω in', JSON.stringify(s));
-        ok(s.mag === 80 && s.ph === 450, 'plot wheel leaves both y axes alone', JSON.stringify(s));
-        ok(/^Zoom ω/.test(r.status), 'plot wheel status reads "Zoom ω"', r.status);
+        near(s.x / 6, notch, 1e-9, 'plot wheel scales ω by one notch');
+        near(s.mag / 80, notch, 1e-9, 'plot wheel scales the magnitude axis with ω');
+        near(s.ph / 450, notch, 1e-9, 'plot wheel scales the phase axis with ω');
+        ok(/^Zoom view/.test(r.status), 'plot wheel status reads "Zoom view"', r.status);
         ok(r.scrollY === 0, 'the page does not scroll while zooming');
 
         // --- left margin: scales magnitude only ---
@@ -192,6 +195,12 @@ async function main() {
         ok(s.x === 6 && s.mag === 80 && s.ph < 450, 'ph y strip zooms the phase axis only',
             JSON.stringify(s));
         ok(/^Phase axis/.test(r.status), 'phase strip status reads "Phase axis"', r.status);
+        // the phase graph's plot body zooms the whole view too
+        await reset();
+        await wheel('phCanvas', phGeo.w / 2, phGeo.h / 2, -100);
+        s = await spans();
+        ok(s.x < 6 && s.mag < 80 && s.ph < 450, 'ph plot wheel zooms the whole view',
+            JSON.stringify(s));
         await reset();
         r = await wheel('phCanvas', phGeo.w / 2, phGeo.h - 5, -100);
         s = await spans();
@@ -209,12 +218,18 @@ async function main() {
             const clientX = Math.round(r.left + g.l + 0.6 * g.w);
             const clientY = Math.round(r.top + g.t + 0.5 * g.h);
             const xLog = A.pxToX(clientX - r.left, g);
-            const fx0 = (xLog - s.view.xmin) / (s.view.xmax - s.view.xmin);
+            const yMag = A.pxToY(clientY - r.top, g, s.yMag);
+            const yPh = A.pxToY(clientY - r.top, g, s.yPh);
+            const fx = w => (xLog - w.xmin) / (w.xmax - w.xmin);
+            const fy = (v, w) => (v - w.min) / (w.max - w.min);
+            const snap = () => [fx(s.view), fy(yMag, s.yMag), fy(yPh, s.yPh)];
+            const before = snap();
             el.dispatchEvent(new WheelEvent('wheel', { clientX, clientY, deltaY: -100,
                 bubbles: true, cancelable: true, view: window }));
-            const fx1 = (xLog - s.view.xmin) / (s.view.xmax - s.view.xmin);
-            return { fx0, fx1 }; })()`);
-        near(frac.fx1, frac.fx0, 1e-9, 'plot zoom is anchored under the cursor');
+            return { before, after: snap() }; })()`);
+        near(frac.after[0], frac.before[0], 1e-9, 'view zoom is anchored under the cursor (ω)');
+        near(frac.after[1], frac.before[1], 1e-9, 'view zoom is anchored under the cursor (dB)');
+        near(frac.after[2], frac.before[2], 1e-9, 'view zoom is anchored under the cursor (°)');
 
         await reset();
         const yFrac = await evalPage(`(() => { const A = window.BodeApp, s = A.state;
@@ -265,6 +280,16 @@ async function main() {
         s = await spans();
         ok(Math.abs(s.x - 24) < 1e-9 && Math.abs(s.mag - 3600) < 1e-9,
             'zoom-out stops at the maximum spans', JSON.stringify(s));
+
+        // one pinned window halts the whole view zoom (all-or-nothing)
+        await reset();
+        await evalPage(`(() => { const s = window.__bode.state;
+            s.yMag.min = 0; s.yMag.max = 4;
+            return true; })()`);
+        await wheel('magCanvas', geo.w / 2, geo.h / 2, -100);
+        s = await spans();
+        ok(s.x === 6 && s.mag === 4 && s.ph === 450,
+            'a pinned y window stops the whole view zoom', JSON.stringify(s));
 
         await reset();
     } finally {

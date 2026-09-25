@@ -6,7 +6,7 @@ const state = A.state;
 const { setStatus } = A;
 
 const TOOL_HINTS = {
-    select: 'Select — drag the <b>line</b> for gain · drag a <b>marker</b> for ω · background drag pans · wheel zooms ω · scroll on an axis to scale it',
+    select: 'Select — drag the <b>line</b> for gain · drag a <b>marker</b> for ω · background drag pans · wheel zooms the view · scroll on an axis to scale it',
     zero: 'Place <b>zero</b> — click a plot (snaps to a grid line, else 0.05 decade · <b>Ctrl</b> = free) · click again to raise order',
     pole: 'Place <b>pole</b> — click a plot (snaps to a grid line, else 0.05 decade · <b>Ctrl</b> = free) · click again to raise order',
     czero: 'Place <b>complex zero pair</b> (+40 dB/dec) — click a plot',
