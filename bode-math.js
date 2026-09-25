@@ -783,6 +783,20 @@ function clusterElems(elems, gapDec) {
 }
 
 /**
+ * Graphs an element is drawn on. Missing `plots` (pre-sync drawings and the
+ * true solution) means "both graphs"; an explicit empty list means "neither".
+ */
+function elemPlots(e) {
+  return Array.isArray(e.plots) ? e.plots : ['mag', 'ph'];
+}
+
+/** True when some element lives on exactly one graph — i.e. the two graphs
+ *  hold different drawings (mirroring off), so each must be checked alone. */
+function splitAcrossPlots(elems) {
+  return elems.some(e => elemPlots(e).length === 1);
+}
+
+/**
  * With graph mirroring off, the same intended element may be drawn separately
  * on the magnitude and phase graphs (two entries with disjoint `plots`).
  * Fold those into one before clustering so the checker doesn't see a phantom
@@ -792,34 +806,110 @@ function clusterElems(elems, gapDec) {
 function coalesceMirrored(elems) {
   const out = [];
   for (const e of elems) {
-    const pa = Array.isArray(e.plots) ? e.plots : null;
-    if (pa && pa.length === 0) continue;
+    const pa = elemPlots(e);
+    if (pa.length === 0) continue;
     let m = null;
     for (const o of out) {
       if (o.type !== e.type || o.kind !== e.kind || !!o.rhp !== !!e.rhp) continue;
       const wo = freqOf(o), we = freqOf(e);
       if (Math.abs(wo - we) > 1e-9 * Math.max(wo, we)) continue;
-      const pb = Array.isArray(o.plots) ? o.plots : null;
-      if (!pa || !pb) continue;
+      const pb = elemPlots(o);
       if (pa.some(p => pb.indexOf(p) !== -1)) continue;
       m = o;
       break;
     }
     if (m) {
       m.order = Math.max(m.order, e.order);
-      for (const p of e.plots) if (m.plots.indexOf(p) === -1) m.plots.push(p);
+      m.plots = elemPlots(m).concat(pa.filter(p => elemPlots(m).indexOf(p) === -1));
     } else {
       const copy = Object.assign({}, e);
-      if (Array.isArray(e.plots)) copy.plots = e.plots.slice();
+      copy.plots = pa.slice();
       out.push(copy);
     }
   }
   return out;
 }
 
+const PLOT_TITLE = { mag: 'magnitude graph', ph: 'phase graph' };
+
+function clusterLabel(c) {
+  const name = c.type === 'zero' ? 'Zero' : 'Pole';
+  const kind = c.kind === 'complex' ? ' complex pair' : (c.rhp ? ' (RHP)' : '');
+  const ord = c.order > 1 ? ' ×' + c.order : '';
+  return name + kind + ' at ω = ' + fmtW(c.w) + ord;
+}
+
+/**
+ * Match true clusters against drawn clusters (nearest pairs first, so one
+ * drawing can't steal a neighbour's match) and turn the outcome into
+ * checklist items. `plot` tags every item with the graph it came from —
+ * `null` checks the drawing as a whole.
+ */
+function matchElems(tCl, uCl, tolDec, plot) {
+  const where = plot ? ' on the ' + PLOT_TITLE[plot] : '';
+  const items = [];
+
+  const pairs = [];
+  for (let ti = 0; ti < tCl.length; ti++) {
+    for (let ui = 0; ui < uCl.length; ui++) {
+      const t = tCl[ti], u = uCl[ui];
+      if (u.type !== t.type || u.kind !== t.kind || !!u.rhp !== !!t.rhp) continue;
+      const d = Math.abs(Math.log10(u.w / t.w));
+      if (d <= tolDec) pairs.push({ ti, ui, d });
+    }
+  }
+  pairs.sort((a, b) => a.d - b.d);
+
+  const mT = new Array(tCl.length).fill(-1);
+  const mU = new Array(uCl.length).fill(false);
+  for (const p of pairs) {
+    if (mT[p.ti] < 0 && !mU[p.ui]) { mT[p.ti] = p.ui; mU[p.ui] = true; }
+  }
+
+  for (let ti = 0; ti < tCl.length; ti++) {
+    const t = tCl[ti];
+    const ui = mT[ti];
+    if (ui >= 0) {
+      const u = uCl[ui];
+      const okOrd = u.order === t.order;
+      items.push({
+        ok: okOrd, kind: 'elem', plot,
+        text: clusterLabel(t) + where +
+          (okOrd ? ': ok' : ': expected order ×' + t.order + ', you drew ×' + u.order),
+      });
+      continue;
+    }
+    // diagnostics: complex vs. double-real confusion
+    let hint = '';
+    if (t.kind === 'complex') {
+      const dbl = uCl.some((u, i) => !mU[i] && u.type === t.type && u.kind === 'real' &&
+        Math.abs(Math.log10(u.w / t.w)) <= tolDec && u.order >= 2 * t.order);
+      if (dbl) hint = ' — you drew real poles/zeroes (same magnitude slope, but phase differs)';
+    } else if (t.kind === 'real' && t.order >= 2) {
+      const cx = uCl.some((u, i) => !mU[i] && u.type === t.type && u.kind === 'complex' &&
+        Math.abs(Math.log10(u.w / t.w)) <= tolDec);
+      if (cx) hint = ' — you drew a complex pair (phase differs from a double real corner)';
+    }
+    items.push({ ok: false, kind: 'elem', plot, text: 'Missing' + where + ': ' + clusterLabel(t) + hint });
+  }
+  for (let ui = 0; ui < uCl.length; ui++) {
+    if (!mU[ui]) items.push({
+      ok: false, kind: 'extra', plot,
+      text: 'Extra' + where + ': ' + clusterLabel(uCl[ui]) + ' (not in G(s))',
+    });
+  }
+  return items;
+}
+
 /**
  * Compare a user drawing against the true TF.
- * Returns { items: [{ok, kind, text}], score: {ok, total} }.
+ *
+ * Gain, K's sign and the origin orders are shared by both graphs, so they are
+ * checked once. Finite poles/zeroes are per graph: when the drawing differs
+ * between the magnitude and phase graphs (mirroring off) each graph is
+ * compared on its own, so a mistake on either one is reported for that graph.
+ *
+ * Returns { items: [{ok, kind, text, plot}], score: {ok, total} }.
  */
 function checkSolution(tf, user, opts) {
   opts = opts || {};
@@ -832,7 +922,7 @@ function checkSolution(tf, user, opts) {
   const tDB = trueState.gainDB, uDB = user.gainDB;
   const gainOk = Math.abs(tDB - uDB) <= gainTol;
   items.push({
-    ok: gainOk, kind: 'gain',
+    ok: gainOk, kind: 'gain', plot: null,
     text: 'Gain 20 lg|K|: ' + (gainOk ? 'ok' : 'expected ≈') + ' ' + fmtDb(tDB) + ' dB — you have ' + fmtDb(uDB) + ' dB',
   });
 
@@ -840,67 +930,34 @@ function checkSolution(tf, user, opts) {
   if (tf.gain < 0) {
     const signOk = (user.gainSign == null ? 1 : user.gainSign) < 0;
     items.push({
-      ok: signOk, kind: 'sign',
+      ok: signOk, kind: 'sign', plot: null,
       text: signOk ? 'Sign of K: ok (K < 0, phase shifted 180°)' : 'K is negative — set K sign to “−” in the Gain panel',
     });
   }
 
   // --- origin orders ---
   items.push({
-    ok: tf.z0 === user.z0, kind: 'origin',
+    ok: tf.z0 === user.z0, kind: 'origin', plot: null,
     text: 'Zeroes at origin s' + sup(tf.z0) + ': expected ' + tf.z0 + ', you drew ' + user.z0,
   });
   items.push({
-    ok: tf.p0 === user.p0, kind: 'origin',
+    ok: tf.p0 === user.p0, kind: 'origin', plot: null,
     text: 'Poles at origin 1/s' + sup(tf.p0) + ': expected ' + tf.p0 + ', you drew ' + user.p0,
   });
 
   // --- finite elements, clustered so split double-poles still match ---
   const tCl = clusterElems(trueState.elems, 0.026);
-  const uCl = clusterElems(coalesceMirrored(user.elems || []), 0.026);
-  const used = new Array(uCl.length).fill(false);
-
-  const label = (c) => {
-    const name = c.type === 'zero' ? 'Zero' : 'Pole';
-    const kind = c.kind === 'complex' ? ' complex pair' : (c.rhp ? ' (RHP)' : '');
-    const ord = c.order > 1 ? ' ×' + c.order : '';
-    return name + kind + ' at ω = ' + fmtW(c.w) + ord;
-  };
-
-  for (const t of tCl) {
-    let best = -1, bestD = Infinity;
-    for (let i = 0; i < uCl.length; i++) {
-      if (used[i]) continue;
-      const u = uCl[i];
-      if (u.type !== t.type || u.kind !== t.kind || !!u.rhp !== !!t.rhp) continue;
-      const d = Math.abs(Math.log10(u.w / t.w));
-      if (d <= tolDec && d < bestD) { bestD = d; best = i; }
+  const drawn = (user.elems || []).filter(e => elemPlots(e).length > 0);
+  if (splitAcrossPlots(drawn)) {
+    // mirroring off: the graphs are independent drawings — check each one
+    for (const plot of ['mag', 'ph']) {
+      const onPlot = drawn.filter(e => elemPlots(e).indexOf(plot) !== -1);
+      items.push.apply(items, matchElems(tCl, clusterElems(onPlot, 0.026), tolDec, plot));
     }
-    if (best >= 0) {
-      used[best] = true;
-      const u = uCl[best];
-      const ok = u.order === t.order;
-      items.push({
-        ok, kind: 'elem',
-        text: label(t) + (ok ? ': ok' : ': expected order ×' + t.order + ', you drew ×' + u.order),
-      });
-    } else {
-      // diagnostics: complex vs. double-real confusion
-      let hint = '';
-      if (t.kind === 'complex') {
-        const dbl = uCl.some((u, i) => !used[i] && u.type === t.type && u.kind === 'real' &&
-          Math.abs(Math.log10(u.w / t.w)) <= tolDec && u.order >= 2 * t.order);
-        if (dbl) hint = ' — you drew real poles/zeroes (same magnitude slope, but phase differs)';
-      } else if (t.kind === 'real' && t.order >= 2) {
-        const cx = uCl.some((u, i) => !used[i] && u.type === t.type && u.kind === 'complex' &&
-          Math.abs(Math.log10(u.w / t.w)) <= tolDec);
-        if (cx) hint = ' — you drew a complex pair (phase differs from a double real corner)';
-      }
-      items.push({ ok: false, kind: 'elem', text: 'Missing: ' + label(t) + hint });
-    }
-  }
-  for (let i = 0; i < uCl.length; i++) {
-    if (!used[i]) items.push({ ok: false, kind: 'extra', text: 'Extra: ' + label(uCl[i]) + ' (not in G(s))' });
+  } else {
+    // same elements everywhere: one pass over the whole drawing
+    const uCl = clusterElems(coalesceMirrored(drawn), 0.026);
+    items.push.apply(items, matchElems(tCl, uCl, tolDec, null));
   }
 
   const total = items.filter(it => it.kind !== 'info').length;
@@ -1499,7 +1556,7 @@ function selfTest() {
   r = checkSolution(tf, t5);
   ok(r.items.every(it => it.ok), 'check: negative K perfect', JSON.stringify(r.items.filter(i => !i.ok)));
 
-  // ---- graph-mirroring off: same element drawn separately per graph ----
+  // ---- graph-mirroring off: each graph is checked on its own ----
   tf = parseTransferFunction('1/(1+s/10)');
   const tMir = stateFromTF(tf);
   const splitPlots = JSON.parse(JSON.stringify(tMir));
@@ -1507,6 +1564,17 @@ function selfTest() {
     .concat(tMir.elems.map(e => Object.assign({}, e, { plots: ['ph'] })));
   r = checkSolution(tf, splitPlots);
   ok(r.items.every(it => it.ok), 'check: mirrored split drawing scores perfect',
+     JSON.stringify(r.items.filter(i => !i.ok)));
+  ok(r.items.filter(it => it.kind === 'elem').length === 2,
+     'check: one element item per graph', String(r.items.filter(it => it.kind === 'elem').length));
+  ok(r.items.some(it => it.plot === 'mag') && r.items.some(it => it.plot === 'ph'),
+     'check: element items carry their graph');
+  ok(r.items.filter(it => it.kind === 'gain' || it.kind === 'origin').every(it => !it.plot),
+     'check: shared gain/origin stay graph-agnostic');
+  // same elements on both graphs (mirroring on) → a single untagged pass
+  r = checkSolution(tf, JSON.parse(JSON.stringify(tMir)));
+  ok(r.items.every(it => it.ok) && r.items.every(it => !it.plot),
+     'check: mirrored drawing checked once, untagged',
      JSON.stringify(r.items.filter(i => !i.ok)));
   const coal = coalesceMirrored(splitPlots.elems);
   ok(coal.length === 1 && coal[0].order === 1, 'coalesce: folds disjoint-plot twins',
@@ -1522,11 +1590,56 @@ function selfTest() {
   const clSame = clusterElems(cSame, 0.026);
   ok(clSame.length === 1 && clSame[0].order === 2, 'coalesce: same-graph orders still sum',
      'len=' + clSame.length + ' order=' + (clSame[0] && clSame[0].order));
-  // mag-only drawing (not mirrored on phase) still counts as the element
+
+  // magnitude graph right, phase graph never drawn → phase flagged, mag clean
   const magOnly = JSON.parse(JSON.stringify(tMir));
   magOnly.elems = magOnly.elems.map(e => Object.assign({}, e, { plots: ['mag'] }));
   r = checkSolution(tf, magOnly);
-  ok(r.items.every(it => it.ok), 'check: single-graph drawing still perfect',
+  ok(r.items.filter(it => it.plot === 'mag').every(it => it.ok),
+     'check: mag-only drawing is clean on the magnitude graph',
+     JSON.stringify(r.items.filter(i => i.plot === 'mag' && !i.ok)));
+  ok(r.items.some(it => it.plot === 'ph' && !it.ok && /^Missing on the phase graph/.test(it.text)),
+     'check: flags element missing on the phase graph',
+     JSON.stringify(r.items.filter(i => !i.ok)));
+  ok(r.items.every(it => it.ok || it.plot === 'ph'),
+     'check: mag-only drawing reports nothing against the magnitude graph',
+     JSON.stringify(r.items.filter(i => !i.ok)));
+
+  // extra element on the phase graph only
+  const phExtra = JSON.parse(JSON.stringify(splitPlots));
+  phExtra.elems.push({ type: 'zero', kind: 'real', w: 100, rhp: false, order: 1, plots: ['ph'] });
+  r = checkSolution(tf, phExtra);
+  ok(r.items.filter(it => it.plot === 'mag').every(it => it.ok),
+     'check: extra on phase leaves magnitude clean',
+     JSON.stringify(r.items.filter(i => i.plot === 'mag' && !i.ok)));
+  ok(r.items.some(it => it.plot === 'ph' && it.kind === 'extra' && !it.ok),
+     'check: flags extra element drawn on the phase graph',
+     JSON.stringify(r.items.filter(i => !i.ok)));
+
+  // corner frequency moved on the phase graph only
+  const phMoved = JSON.parse(JSON.stringify(splitPlots));
+  phMoved.elems.find(e => e.plots[0] === 'ph').w = 100;
+  r = checkSolution(tf, phMoved);
+  ok(r.items.filter(it => it.plot === 'mag').every(it => it.ok),
+     'check: moved phase corner leaves magnitude clean',
+     JSON.stringify(r.items.filter(i => i.plot === 'mag' && !i.ok)));
+  ok(r.items.some(it => it.plot === 'ph' && /^Missing on the phase graph/.test(it.text)) &&
+     r.items.some(it => it.plot === 'ph' && /^Extra on the phase graph/.test(it.text)),
+     'check: moved corner reports missing+extra on the phase graph',
+     JSON.stringify(r.items.filter(i => !i.ok)));
+
+  // order short by one on the phase graph only (would slip through a union check)
+  tf = parseTransferFunction('1/(1+s/10)^2');
+  const tDbl = stateFromTF(tf);
+  const dblSplit = JSON.parse(JSON.stringify(tDbl));
+  dblSplit.elems = dblSplit.elems.map(e => Object.assign({}, e, { plots: ['mag'] }))
+    .concat(tDbl.elems.map(e => Object.assign({}, e, { order: 1, plots: ['ph'] })));
+  r = checkSolution(tf, dblSplit);
+  ok(r.items.filter(it => it.plot === 'mag').every(it => it.ok),
+     'check: ×2 on magnitude still correct',
+     JSON.stringify(r.items.filter(i => i.plot === 'mag' && !i.ok)));
+  ok(r.items.some(it => it.plot === 'ph' && !it.ok && /expected order ×2, you drew ×1/.test(it.text)),
+     'check: flags short order on the phase graph',
      JSON.stringify(r.items.filter(i => !i.ok)));
 
   // ---- misc helpers ----

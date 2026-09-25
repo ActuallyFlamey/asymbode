@@ -1219,19 +1219,29 @@ function renderCheck(res) {
   const box = els.checkResults;
   box.innerHTML = '';
   const allOk = res.score.ok === res.score.total;
+  const perGraph = res.items.some(it => it.plot);
   const score = document.createElement('div');
   score.className = 'check-score ' + (allOk ? 'good' : 'bad');
-  score.textContent = res.score.ok + ' / ' + res.score.total + ' correct' + (allOk ? ' — perfect!' : '');
+  score.textContent = res.score.ok + ' / ' + res.score.total + ' correct' +
+    (allOk ? ' — perfect!' : (perGraph ? ' · each graph checked on its own' : ''));
   box.appendChild(score);
   for (const it of res.items) {
     const row = document.createElement('div');
-    row.className = 'check-item ' + (it.ok ? 'ok' : 'fail');
+    row.className = 'check-item ' + (it.ok ? 'ok' : 'fail') + (it.plot ? ' on-' + it.plot : '');
     const mark = document.createElement('span');
     mark.className = 'mark';
     mark.textContent = it.ok ? '✓' : '✗';
+    row.appendChild(mark);
+    if (it.plot) {
+      const tag = document.createElement('span');
+      tag.className = 'plot-tag ' + it.plot;
+      tag.textContent = it.plot === 'mag' ? 'mag' : 'φ';
+      tag.title = 'Drawn on the ' + (it.plot === 'mag' ? 'magnitude' : 'phase') + ' graph';
+      row.appendChild(tag);
+    }
     const txt = document.createElement('span');
     txt.textContent = it.text;
-    row.append(mark, txt);
+    row.appendChild(txt);
     box.appendChild(row);
   }
   const hint = document.createElement('div');

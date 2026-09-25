@@ -539,6 +539,7 @@ body {
   color: var(--text);
 }
 .check-item .mark { flex: none; font-weight: 700; }
+.check-item .plot-tag { flex: none; margin-left: 0; margin-top: 1px; }
 .check-item.ok .mark { color: var(--green); }
 .check-item.fail .mark { color: var(--red); }
 .check-item.info .mark { color: var(--muted); }
