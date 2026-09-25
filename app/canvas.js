@@ -35,7 +35,7 @@ function drawAxes(ctx, w, h, yr, opts) {
     ctx.fillStyle = '#0c1118';
     ctx.fillRect(g.l, g.t, g.w, g.h);
 
-    const step = yr.step || yTickStep(yr.max - yr.min, isPhase);
+    const step = yTickStep(yr.max - yr.min, isPhase);
     const decs = [];
     for (let k = Math.ceil(state.view.xmin); k <= Math.floor(state.view.xmax); k++) decs.push(k);
     const spanDec = state.view.xmax - state.view.xmin;

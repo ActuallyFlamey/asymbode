@@ -6,7 +6,8 @@
 'use strict';
 
 const state = A.state;
-const { geom, xToPx, pxToX, yToPx, pxToY, wheelTarget, wheelFactor, scaleX, scaleY, scaleView } = A;
+const { geom, xToPx, pxToX, yToPx, pxToY, wheelTarget, wheelFactor, scaleX, scaleY, scaleView,
+    yTickStep, niceYBounds, drawAxes } = A;
 
 function selfTest() {
     const failures = [];
@@ -114,6 +115,44 @@ function selfTest() {
         'scaleView: all-or-nothing when a y window is at its limit');
     ok(scaleView(v3, [{ min: -40, max: 40 }, { min: 0, max: A.Y_SPAN.max }], 0, [0, 0], 1.12) === null,
         'scaleView: all-or-nothing when any y window is at its limit');
+
+    // ---- tick steps follow the *current* window, not the one fitView froze ----
+    ok(!('step' in niceYBounds(0, 100, false)), 'niceYBounds: no longer bakes a step into the window');
+    near(yTickStep(80, false), 20, 1e-9, 'yTickStep: 80 dB window → 20 dB (±20 dB/dec slopes)');
+    near(yTickStep(40, false), 20, 1e-9, 'yTickStep: 40 dB window still lands on 20 dB');
+    near(yTickStep(39, false), 10, 1e-9, 'yTickStep: 39 dB window → 10 dB');
+    near(yTickStep(20, false), 5, 1e-9, 'yTickStep: 20 dB window → 5 dB');
+    near(yTickStep(10, false), 2, 1e-9, 'yTickStep: 10 dB window → 2 dB');
+    near(yTickStep(4, false), 1, 1e-9, 'yTickStep: minimum span → 1 dB');
+    near(yTickStep(450, true), 90, 1e-9, 'yTickStep: 450° window → 90°');
+    near(yTickStep(40, true), 10, 1e-9, 'yTickStep: 40° window → 10°');
+    near(yTickStep(4, true), 1, 1e-9, 'yTickStep: minimum phase span → 1°');
+
+    function stubCtx() {
+        const labels = [];
+        return {
+            labels, fillStyle: '', strokeStyle: '', lineWidth: 1, font: '',
+            textAlign: '', textBaseline: '',
+            fillRect() {}, save() {}, restore() {}, beginPath() {}, rect() {},
+            clip() {}, moveTo() {}, lineTo() {}, stroke() {}, strokeRect() {},
+            fillText(t) { labels.push(String(t)); },
+        };
+    }
+    function axisLabels(yr, isPhase) {
+        const ctx = stubCtx();
+        drawAxes(ctx, 600, 400, yr, { yUnit: isPhase ? 'deg' : 'dB', isPhase });
+        return ctx.labels;
+    }
+    // a stale fit step must not survive into a zoomed window
+    let labs = axisLabels({ min: 0, max: 80, step: 500 }, false);
+    ok(labs.indexOf('20') >= 0 && labs.indexOf('80') >= 0,
+        'drawAxes: wide magnitude window labels 20 dB ticks', JSON.stringify(labs));
+    labs = axisLabels({ min: 12, max: 48, step: 20 }, false);
+    ok(labs.indexOf('30') >= 0, 'drawAxes: zoomed magnitude window drops to 10 dB ticks',
+        JSON.stringify(labs));
+    labs = axisLabels({ min: -9, max: 9, step: 45 }, true);
+    ok(labs.indexOf('-5°') >= 0 && labs.indexOf('5°') >= 0,
+        'drawAxes: zoomed phase window labels 5° ticks', JSON.stringify(labs));
 
     // ---- the wheel handler, end to end on a stubbed canvas ----
     const savedState = JSON.stringify({ v: state.view, m: state.yMag, p: state.yPh });

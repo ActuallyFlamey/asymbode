@@ -12,7 +12,7 @@ const MATH_MODULES = [
 ];
 
 const APP_MODULES = [
-    'state', 'util', 'view', 'zoom', 'pointer', 'selftest',
+    'state', 'util', 'view', 'zoom', 'model', 'pointer', 'canvas', 'selftest',
 ];
 
 for (const name of MATH_MODULES) require('./math/' + name + '.js');

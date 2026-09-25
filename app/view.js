@@ -77,7 +77,10 @@ function niceStep(target) {
 
 /**
  * Magnitude gridlines must land on multiples of 20 dB — the ±20/±40 dB/dec
- * slopes are only readable that way — so the 1-2-5 step is rounded up to one.
+ * slopes are only readable that way — so the 1-2-5 step is rounded up to one,
+ * as long as the window still shows several of them. Once zoomed in below
+ * 40 dB the ladder falls back to the plain 1-2-5 steps (10, 5, 2, 1 … dB);
+ * otherwise the axis would run out of gridlines as the span shrinks.
  */
 function yTickStep(span, isPhase) {
     const target = span / 6;
@@ -86,9 +89,16 @@ function yTickStep(span, isPhase) {
         for (const c of cands) if (c >= target) return c;
         return cands[cands.length - 1];
     }
-    return Math.max(20, Math.ceil(niceStep(target) / 20 - 1e-9) * 20);
+    const step = niceStep(target);
+    if (span < 40) return step;
+    return Math.max(20, Math.ceil(step / 20 - 1e-9) * 20);
 }
 
+/**
+ * Pad a data range and snap it onto the tick ladder of its axis. The step is
+ * deliberately *not* stored on the result: drawAxes recomputes it from the
+ * current span, so zooming/panning always refreshes the gridline density.
+ */
 function niceYBounds(min, max, isPhase) {
     if (!isFinite(min) || !isFinite(max)) { min = -1; max = 1; }
     if (max - min < 1e-9) { min -= 1; max += 1; }
@@ -97,7 +107,7 @@ function niceYBounds(min, max, isPhase) {
     const step = yTickStep(max - min, isPhase);
     const lo = Math.floor(min / step) * step;
     const hi = Math.ceil(max / step) * step;
-    return { min: lo, max: hi, step };
+    return { min: lo, max: hi };
 }
 
 // ---------------------------------------------------------------------------

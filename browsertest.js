@@ -291,6 +291,23 @@ async function main() {
         ok(s.x === 6 && s.mag === 4 && s.ph === 450,
             'a pinned y window stops the whole view zoom', JSON.stringify(s));
 
+        // --- zooming in refines the tick ladder, not just the window ---
+        await reset();
+        for (let i = 0; i < 8; i++) await wheel('magCanvas', geo.w / 2, geo.h / 2, -100);
+        s = await spans();
+        ok(s.mag < 40, 'eight plot notches zoom the magnitude axis in below 40 dB',
+            JSON.stringify(s));
+        const tickLabels = await evalPage(`(() => {
+            const proto = window.CanvasRenderingContext2D.prototype;
+            const orig = proto.fillText;
+            const seen = [];
+            proto.fillText = function (t) { seen.push(String(t)); return orig.apply(this, arguments); };
+            try { window.__bode.render(); } finally { proto.fillText = orig; }
+            return seen; })()`);
+        const dBticks = tickLabels.map(Number).filter(v => Number.isFinite(v));
+        ok(dBticks.some(v => v % 20 !== 0), 'zoomed-in magnitude axis shows sub-20 dB ticks',
+            JSON.stringify(tickLabels));
+
         await reset();
     } finally {
         if (ws) try { ws.close(); } catch (_) { /* ok */ }
