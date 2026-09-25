@@ -1,5 +1,5 @@
 /* asymbode — pointer interaction: hover, click-to-place/delete, drag start,
- * wheel zoom. */
+ * wheel zoom and per-axis wheel scaling. */
 (function (A) {
 'use strict';
 
@@ -86,7 +86,7 @@ function bindCanvas(canvasEl, plot) {
             setStatus('Selected <b>' + A.elemLabel(hit) + '</b> ×' + hit.order +
                 ' at ω = <span class="val">' + fmtW(BM.freqOf(hit)) + '</span> — drag to move, <b>Del</b> to remove');
         else
-            setStatus('Background — drag to pan, wheel to zoom ω');
+            setStatus('Background — drag to pan · wheel zooms ω · scroll on an axis to scale it');
         A.updateSidebar();
 
         let mode = 'pan';
@@ -113,24 +113,54 @@ function bindCanvas(canvasEl, plot) {
     });
 }
 
+function statusX(v, isView) {
+    return (isView ? 'Zoom ω ' : 'ω axis ') +
+        '<span class="val">' + fmtW(Math.pow(10, v.xmin)) + '</span> … <span class="val">' +
+        fmtW(Math.pow(10, v.xmax)) + '</span> rad/s';
+}
+
+function statusY(v, plot) {
+    if (plot === 'mag')
+        return 'Magnitude axis <span class="val">' + fmtNum(v.min, 3) + '</span> … <span class="val">' +
+            fmtNum(v.max, 3) + '</span> dB';
+    return 'Phase axis <span class="val">' + fmtNum(v.min) + '</span> … <span class="val">' +
+        fmtNum(v.max) + '</span>°';
+}
+
+/** Scale the ω window about the cursor; no-op when the span limits say no. */
+function zoomX(info, f, isView) {
+    const xc = A.clamp(info.xLog, state.view.xmin, state.view.xmax);
+    const v = A.scaleX(state.view, xc, f);
+    if (!v) return false;
+    state.view.xmin = v.xmin;
+    state.view.xmax = v.xmax;
+    A.render();
+    setStatus(statusX(v, isView));
+    return true;
+}
+
+/** Scale this graph's y window about the cursor; no-op at the span limits. */
+function zoomY(info, plot, f) {
+    const yr = plot === 'mag' ? state.yMag : state.yPh;
+    const yc = A.clamp(info.yVal, yr.min, yr.max);
+    const v = A.scaleY(yr, yc, f);
+    if (!v) return false;
+    yr.min = v.min;
+    yr.max = v.max;
+    A.render();
+    setStatus(statusY(v, plot));
+    return true;
+}
+
 function bindWheel(canvasEl, plot) {
     canvasEl.addEventListener('wheel', (e) => {
         e.preventDefault();
         const info = canvasInfo(canvasEl, plot, e);
-        if (!info.inPlot) return;
-        const span = state.view.xmax - state.view.xmin;
-        if (span <= 0.5 && e.deltaY > 0) return;
-        if (span >= 24 && e.deltaY < 0) return;
-        const f = e.deltaY < 0 ? 1 / 1.12 : 1.12;
-        const xc = A.clamp(info.xLog, state.view.xmin, state.view.xmax);
-        const xmin = xc + (state.view.xmin - xc) * f;
-        const xmax = xc + (state.view.xmax - xc) * f;
-        if (xmax - xmin < 0.4 || xmax - xmin > 24) return;
-        state.view.xmin = xmin;
-        state.view.xmax = xmax;
-        A.render();
-        setStatus('Zoom ω <span class="val">' + fmtW(Math.pow(10, xmin)) + '</span> … <span class="val">' +
-            fmtW(Math.pow(10, xmax)) + '</span> rad/s');
+        const f = A.wheelFactor(e.deltaY);
+        if (!f) return;
+        const target = A.wheelTarget(info.px, info.py, info.g);
+        if (target === 'y') zoomY(info, plot, f);
+        else zoomX(info, f, target === 'view');   // 'x' strip and the plot itself
     }, { passive: false });
 }
 
