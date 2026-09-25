@@ -65,13 +65,28 @@ function snapX(xLog, plot) {
 // axis ticks
 // ---------------------------------------------------------------------------
 
+// Smallest 1-2-5-ladder step that is ≥ target.
+function niceStep(target) {
+    if (!(target > 0)) return 20;
+    const pow = Math.pow(10, Math.floor(Math.log10(target)));
+    const mant = target / pow;
+    const cands = [1, 2, 2.5, 5, 10];
+    for (const c of cands) if (c >= mant - 1e-9) return c * pow;
+    return cands[cands.length - 1] * pow * 10;
+}
+
+/**
+ * Magnitude gridlines must land on multiples of 20 dB — the ±20/±40 dB/dec
+ * slopes are only readable that way — so the 1-2-5 step is rounded up to one.
+ */
 function yTickStep(span, isPhase) {
     const target = span / 6;
-    const cands = isPhase
-        ? [1, 2, 5, 10, 15, 30, 45, 90, 180, 360]
-        : [1, 2, 5, 10, 20, 25, 50, 100, 200];
-    for (const c of cands) if (c >= target) return c;
-    return cands[cands.length - 1];
+    if (isPhase) {
+        const cands = [1, 2, 5, 10, 15, 30, 45, 90, 180, 360];
+        for (const c of cands) if (c >= target) return c;
+        return cands[cands.length - 1];
+    }
+    return Math.max(20, Math.ceil(niceStep(target) / 20 - 1e-9) * 20);
 }
 
 function niceYBounds(min, max, isPhase) {
