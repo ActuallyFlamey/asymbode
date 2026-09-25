@@ -15,15 +15,22 @@ function render() {
     A.drawCrosshair(canvas.magCtx, canvas.magW, canvas.magH, state.yMag, 'mag');
     A.drawCrosshair(canvas.phCtx, canvas.phW, canvas.phH, state.yPh, 'ph');
 
+    // The exact (Ctrl-held) Bode replaces your drawing — comparing the two
+    // curves on top of each other is the whole point of that view.
+    const solVisible = !!(state.showSol && state.tf && state.tfState);
+    const exactView = solVisible && state.ctrlHeld;
+
     // user asymptotes
-    const mpts = BM.asymMagPoints(A.userForPlot('mag'), state.view.xmin, state.view.xmax);
-    const ppts = BM.asymPhasePoints(A.userForPlot('ph'), state.view.xmin, state.view.xmax);
-    A.drawPolyline(canvas.magCtx, mpts, gy, state.yMag, DARK.user, 2.2);
-    A.drawPolyline(canvas.phCtx, ppts, gp, state.yPh, DARK.user, 2.2);
+    if (!exactView) {
+        const mpts = BM.asymMagPoints(A.userForPlot('mag'), state.view.xmin, state.view.xmax);
+        const ppts = BM.asymPhasePoints(A.userForPlot('ph'), state.view.xmin, state.view.xmax);
+        A.drawPolyline(canvas.magCtx, mpts, gy, state.yMag, DARK.user, 2.2);
+        A.drawPolyline(canvas.phCtx, ppts, gp, state.yPh, DARK.user, 2.2);
+    }
 
     // solution overlay: dashed asymptote, or the real Bode plot while Ctrl is held
-    if (state.showSol && state.tf && state.tfState) {
-        if (state.ctrlHeld) {
+    if (solVisible) {
+        if (exactView) {
             const pts = BM.exactCurve(state.tf, state.view.xmin, state.view.xmax, 400,
                 BM.asymPhase(state.tfState, state.view.xmin));
             A.drawPolyline(canvas.magCtx, pts.map(p => ({ x: p.x, y: p.db })), gy, state.yMag, DARK.exact, 1.8);

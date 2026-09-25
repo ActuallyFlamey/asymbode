@@ -23,6 +23,7 @@ function init() {
     els.gainLin = document.getElementById('gainLin');
     els.lgSolution = document.getElementById('lgSolution');
     els.lgExact = document.getElementById('lgExact');
+    els.lgUser = document.getElementById('lgUser');
     els.checkResults = document.getElementById('checkResults');
     els.dragTip = document.getElementById('dragTip');
     els.plots = document.querySelector('.plots');

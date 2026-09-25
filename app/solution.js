@@ -13,14 +13,15 @@ const CHECK_HINT =
 /** Hide the overlay and put the checklist back to its "not checked yet" hint. */
 function resetSolution() {
     state.showSol = false;
-    if (els.lgSolution) els.lgSolution.hidden = true;
-    if (els.lgExact) els.lgExact.hidden = true;
+    updateLegend();
     if (els.checkResults) els.checkResults.innerHTML = CHECK_HINT;
 }
 
 function updateLegend() {
+    const exactView = state.showSol && state.ctrlHeld;
     if (els.lgSolution) els.lgSolution.hidden = !(state.showSol && !state.ctrlHeld);
-    if (els.lgExact) els.lgExact.hidden = !(state.showSol && state.ctrlHeld);
+    if (els.lgExact) els.lgExact.hidden = !exactView;
+    if (els.lgUser) els.lgUser.hidden = exactView;
 }
 
 function setCtrlHeld(v) {
