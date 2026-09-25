@@ -1,154 +1,180 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<title>asymbode — Asymptotic Bode Diagram Trainer</title>
-<link rel="stylesheet" href="style.css">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="data:,">
+    <title>asymbode — Asymptotic Bode Diagram Trainer</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="toolbar">
-  <div class="brand" title="Asymptotic Bode diagram trainer">asymbode</div>
+    <header class="toolbar">
+        <div class="brand" title="Asymptotic Bode diagram trainer">asymbode</div>
 
-  <span class="sep"></span>
+        <span class="sep"></span>
 
-  <div class="tools" role="radiogroup" aria-label="Tools">
-    <button class="tool active" data-tool="select" title="Select / drag line & markers (V)">Select</button>
-    <button class="tool" data-tool="zero" title="Place a zero — dotted +20 dB/dec preview (Z)">⊕ Zero</button>
-    <button class="tool" data-tool="pole" title="Place a pole — dotted −20 dB/dec preview (P)">⊖ Pole</button>
-    <button class="tool" data-tool="czero" title="Place a complex-conjugate zero pair (+40 dB/dec) (C)">◇ C.Zero</button>
-    <button class="tool" data-tool="cpole" title="Place a complex-conjugate pole pair (−40 dB/dec) (X)">◈ C.Pole</button>
-    <button class="tool" data-tool="delete" title="Click a marker to remove it (D)">✕ Delete</button>
-  </div>
-
-  <span class="sep"></span>
-
-  <div class="history-tools">
-    <button id="btnUndo" class="btn icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
-    </button>
-    <button id="btnRedo" class="btn icon" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>
-    </button>
-  </div>
-
-  <span class="sep"></span>
-
-  <button id="btnCheck" class="btn accent" title="Show the true (asymptotic) solution and check your work — hold Ctrl for the real Bode plot">Show solution &amp; Check</button>
-  <button id="btnClear" class="btn" title="Clear your drawn poles/zeroes and gain (keeps the loaded TF)">Clear</button>
-  <button id="btnFit" class="btn" title="Fit axes to all elements (F)">Fit view</button>
-
-  <span class="sep"></span>
-
-  <button id="btnExportPng" class="btn" title="Download the current diagrams as a PNG image">Export PNG</button>
-  <button id="btnCopyImg" class="btn" title="Copy the current diagrams as an image — paste straight into AFFiNE">Copy image</button>
-</header>
-
-<div id="tfError" class="tf-error" hidden></div>
-
-<main class="workspace">
-  <section class="plots">
-    <div class="plot-head">
-      <h2>Magnitude <span class="unit">dB</span></h2>
-      <div class="legend" id="legend">
-        <span class="lg-item"><i class="lg-line user"></i>your asymptote</span>
-        <span class="lg-item" id="lgSolution" hidden><i class="lg-line sol"></i>solution</span>
-        <span class="lg-item" id="lgExact" hidden><i class="lg-line exact"></i>real Bode</span>
-        <span class="lg-item"><i class="lg-dot zero"></i>zero</span>
-        <span class="lg-item"><i class="lg-dot pole"></i>pole</span>
-        <span class="lg-item"><i class="lg-dot cplx"></i>complex pair</span>
-      </div>
-    </div>
-    <div class="canvas-wrap" id="magWrap"><canvas id="magCanvas"></canvas></div>
-
-    <div class="plot-head">
-      <h2>Phase <span class="unit">deg</span></h2>
-    </div>
-    <div class="canvas-wrap" id="phWrap"><canvas id="phCanvas"></canvas></div>
-
-    <div class="drag-tip" id="dragTip" hidden></div>
-  </section>
-
-  <aside class="sidebar">
-    <section class="panel">
-      <h3>Poles / zeroes at the origin</h3>
-      <div class="origin-row">
-        <span class="origin-label" title="Zeroes at s=0 — raise initial slope by +20 dB/dec each">zeroes&nbsp;s<sup>n</sup></span>
-        <button class="mini" id="z0Minus" title="Remove one zero at origin">−</button>
-        <span class="count" id="z0Count">0</span>
-        <button class="mini" id="z0Plus" title="Add a zero at origin (differentiator)">+</button>
-      </div>
-      <div class="origin-row">
-        <span class="origin-label" title="Poles at s=0 — lower initial slope by −20 dB/dec each">poles&nbsp;1/s<sup>n</sup></span>
-        <button class="mini" id="p0Minus" title="Remove one pole at origin">−</button>
-        <span class="count" id="p0Count">0</span>
-        <button class="mini" id="p0Plus" title="Add a pole at origin (integrator)">+</button>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h3>Your elements</h3>
-      <label class="toggle-row" for="syncToggle"
-             title="When on, a pole/zero drawn or edited on one graph also appears on the other — keeping both plots consistent. When off, each graph keeps its own placements for independent study.">
-        <input type="checkbox" id="syncToggle" checked>
-        <span class="toggle-switch" aria-hidden="true"></span>
-        <span class="toggle-label">Mirror edits across graphs</span>
-      </label>
-      <div id="elemList" class="elem-list">
-        <div class="empty-hint">Nothing placed yet — pick a Zero/Pole tool and click on a plot.</div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h3>Transfer function</h3>
-      <div class="tf-render" id="tfRender" title="G(s) as it would appear in a rendered TeX document — updates as you type"></div>
-      <div class="tf-edit">
-        <input id="kInput" class="tf-k" type="text" spellcheck="false" autocomplete="off"
-               placeholder="K" aria-label="Gain K of G(s)" value="1"
-               title="Gain K of the transfer function: G(s) = K · N(s)/D(s)">
-        <div class="tf-nd">
-          <input id="numInput" class="tf-part" type="text" spellcheck="false" autocomplete="off"
-                 placeholder="numerator" aria-label="Numerator of G(s)" value="1">
-          <div class="tf-bar" aria-hidden="true"></div>
-          <input id="denInput" class="tf-part" type="text" spellcheck="false" autocomplete="off"
-                 placeholder="denominator" aria-label="Denominator of G(s)" value="1+10^{-4}s">
+        <div class="tools" role="radiogroup" aria-label="Tools">
+            <button class="tool active" data-tool="select" title="Select / drag line & markers (V)">Select</button>
+            <button class="tool" data-tool="zero" title="Place a zero — dotted +20 dB/dec preview (Z)">⊕ Zero</button>
+            <button class="tool" data-tool="pole" title="Place a pole — dotted −20 dB/dec preview (P)">⊖ Pole</button>
+            <button class="tool" data-tool="czero" title="Place a complex-conjugate zero pair (+40 dB/dec) (C)">◇ C.Zero</button>
+            <button class="tool" data-tool="cpole" title="Place a complex-conjugate pole pair (−40 dB/dec) (X)">◈ C.Pole</button>
+            <button class="tool" data-tool="delete" title="Click a marker to remove it (D)">✕ Delete</button>
         </div>
-      </div>
-      <div class="user-gain">
-        <div class="user-gain-title">Your gain <span class="user-gain-sub">— drag the magnitude line</span></div>
-        <div class="gain-row">
-          <label for="gainInput">20&nbsp;lg|K|</label>
-          <input id="gainInput" type="number" step="0.1" value="0" min="-200" max="200">
-          <span class="unit">dB</span>
-          <button class="mini" id="gainSignBtn" title="Sign of K (negative K shifts the phase by 180°)">K:&nbsp;+</button>
+
+        <span class="sep"></span>
+
+        <div class="history-tools">
+            <button id="btnUndo" class="btn icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+            </button>
+            <button id="btnRedo" class="btn icon" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>
+            </button>
         </div>
-        <div class="gain-hint">|K| = <span id="gainLin">1</span></div>
-      </div>
-    </section>
 
-    <section class="panel">
-      <h3>Solution &amp; check</h3>
-      <div id="checkResults" class="check-results">
-        <div class="empty-hint">Load a transfer function, draw your asymptote, then press <b>Show solution &amp; Check</b>.</div>
-      </div>
-    </section>
+        <span class="sep"></span>
 
-    <section class="panel help">
-      <h3>Help</h3>
-      <ul>
-        <li><b>K</b>, numerator &amp; denominator fields take plain maths — e.g. K <code>1</code>, <code>1</code> over <code>1+10^{-4}s</code>, or K <code>10*(1+s/10)</code>… — or LaTeX like <code>\frac{1}{1+s}</code> in either field</li>
-        <li>Click on a plot with a Zero/Pole tool to place; click again on the same spot to increase its order (×2 → +40&nbsp;dB/dec…)</li>
-        <li><b>Shift + hover</b> a marker (or just hover while placing) shows its raw power as a dotted line on the plot you're hovering — hidden when the pointer leaves the plot</li>
-        <li><code>Del</code> removes the selected element · <code>Esc</code> switches back to the Select tool</li>
-      </ul>
-    </section>
-  </aside>
-</main>
+        <button id="btnCheck" class="btn accent" title="Show the true (asymptotic) solution and check your work — hold Ctrl for the real Bode plot">Show solution &amp; Check</button>
+        <button id="btnClear" class="btn" title="Clear your drawn poles/zeroes and gain (keeps the loaded TF)">Clear</button>
+        <button id="btnFit" class="btn" title="Fit axes to all elements (F)">Fit view</button>
 
-<footer class="status" id="status">Ready.</footer>
+        <span class="sep"></span>
 
-<script src="bode-math.js"></script>
-<script src="bode-app.js"></script>
+        <button id="btnExportPng" class="btn" title="Download the current diagrams as a PNG image">Export PNG</button>
+        <button id="btnCopyImg" class="btn" title="Copy the current diagrams as an image — paste straight into AFFiNE">Copy image</button>
+    </header>
+
+    <div id="tfError" class="tf-error" hidden></div>
+
+    <main class="workspace">
+        <section class="plots">
+            <div class="plot-head">
+                <h2>Magnitude <span class="unit">dB</span></h2>
+                <div class="legend" id="legend">
+                    <span class="lg-item"><i class="lg-line user"></i>your asymptote</span>
+                    <span class="lg-item" id="lgSolution" hidden><i class="lg-line sol"></i>solution</span>
+                    <span class="lg-item" id="lgExact" hidden><i class="lg-line exact"></i>real Bode</span>
+                    <span class="lg-item"><i class="lg-dot zero"></i>zero</span>
+                    <span class="lg-item"><i class="lg-dot pole"></i>pole</span>
+                    <span class="lg-item"><i class="lg-dot cplx"></i>complex pair</span>
+                </div>
+            </div>
+            <div class="canvas-wrap" id="magWrap"><canvas id="magCanvas"></canvas></div>
+
+            <div class="plot-head">
+                <h2>Phase <span class="unit">deg</span></h2>
+            </div>
+            <div class="canvas-wrap" id="phWrap"><canvas id="phCanvas"></canvas></div>
+
+            <div class="drag-tip" id="dragTip" hidden></div>
+        </section>
+
+        <aside class="sidebar">
+            <section class="panel">
+                <h3>Poles / zeroes at the origin</h3>
+                <div class="origin-row">
+                    <span class="origin-label" title="Zeroes at s=0 — raise initial slope by +20 dB/dec each">zeroes&nbsp;s<sup>n</sup></span>
+                    <button class="mini" id="z0Minus" title="Remove one zero at origin">−</button>
+                    <span class="count" id="z0Count">0</span>
+                    <button class="mini" id="z0Plus" title="Add a zero at origin (differentiator)">+</button>
+                </div>
+                <div class="origin-row">
+                    <span class="origin-label" title="Poles at s=0 — lower initial slope by −20 dB/dec each">poles&nbsp;1/s<sup>n</sup></span>
+                    <button class="mini" id="p0Minus" title="Remove one pole at origin">−</button>
+                    <span class="count" id="p0Count">0</span>
+                    <button class="mini" id="p0Plus" title="Add a pole at origin (integrator)">+</button>
+                </div>
+            </section>
+
+            <section class="panel">
+                <h3>Your elements</h3>
+                <label class="toggle-row" for="syncToggle"
+                       title="When on, a pole/zero drawn or edited on one graph also appears on the other — keeping both plots consistent. When off, each graph keeps its own placements for independent study.">
+                    <input type="checkbox" id="syncToggle" checked>
+                    <span class="toggle-switch" aria-hidden="true"></span>
+                    <span class="toggle-label">Mirror edits across graphs</span>
+                </label>
+                <div id="elemList" class="elem-list">
+                    <div class="empty-hint">Nothing placed yet — pick a Zero/Pole tool and click on a plot.</div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <h3>Transfer function</h3>
+                <div class="tf-render" id="tfRender" title="G(s) as it would appear in a rendered TeX document — updates as you type"></div>
+                <div class="tf-edit">
+                    <input id="kInput" class="tf-k" type="text" spellcheck="false" autocomplete="off"
+                           placeholder="K" aria-label="Gain K of G(s)" value="1"
+                           title="Gain K of the transfer function: G(s) = K · N(s)/D(s)">
+                    <div class="tf-nd">
+                        <input id="numInput" class="tf-part" type="text" spellcheck="false" autocomplete="off"
+                               placeholder="numerator" aria-label="Numerator of G(s)" value="1">
+                        <div class="tf-bar" aria-hidden="true"></div>
+                        <input id="denInput" class="tf-part" type="text" spellcheck="false" autocomplete="off"
+                               placeholder="denominator" aria-label="Denominator of G(s)" value="1+10^{-4}s">
+                    </div>
+                </div>
+                <div class="user-gain">
+                    <div class="user-gain-title">Your gain <span class="user-gain-sub">— drag the magnitude line</span></div>
+                    <div class="gain-row">
+                        <label for="gainInput">20&nbsp;lg|K|</label>
+                        <input id="gainInput" type="number" step="0.1" value="0" min="-200" max="200">
+                        <span class="unit">dB</span>
+                        <button class="mini" id="gainSignBtn" title="Sign of K (negative K shifts the phase by 180°)">K:&nbsp;+</button>
+                    </div>
+                    <div class="gain-hint">|K| = <span id="gainLin">1</span></div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <h3>Solution &amp; check</h3>
+                <div id="checkResults" class="check-results">
+                    <div class="empty-hint">Load a transfer function, draw your asymptote, then press <b>Show solution &amp; Check</b>.</div>
+                </div>
+            </section>
+
+            <section class="panel help">
+                <h3>Help</h3>
+                <ul>
+                    <li><b>K</b>, numerator &amp; denominator fields take plain maths — e.g. K <code>1</code>, <code>1</code> over <code>1+10^{-4}s</code>, or K <code>10*(1+s/10)</code>… — or LaTeX like <code>\frac{1}{1+s}</code> in either field</li>
+                    <li>Click on a plot with a Zero/Pole tool to place; click again on the same spot to increase its order (×2 → +40&nbsp;dB/dec…)</li>
+                    <li><b>Shift + hover</b> a marker (or just hover while placing) shows its raw power as a dotted line on the plot you're hovering — hidden when the pointer leaves the plot</li>
+                    <li><code>Del</code> removes the selected element · <code>Esc</code> switches back to the Select tool</li>
+                </ul>
+            </section>
+        </aside>
+    </main>
+
+    <footer class="status" id="status">Ready.</footer>
+
+    <!-- math layer (order matters: factor/curves/check/selftest capture what
+         earlier modules export when they load) -->
+    <script src="math/format.js"></script>
+    <script src="math/parse.js"></script>
+    <script src="math/poly.js"></script>
+    <script src="math/factor.js"></script>
+    <script src="math/curves.js"></script>
+    <script src="math/check.js"></script>
+    <script src="math/tex.js"></script>
+    <script src="math/selftest.js"></script>
+
+    <!-- app layer (order matters: state.js and util.js come first, init.js last) -->
+    <script src="app/state.js"></script>
+    <script src="app/util.js"></script>
+    <script src="app/history.js"></script>
+    <script src="app/view.js"></script>
+    <script src="app/model.js"></script>
+    <script src="app/canvas.js"></script>
+    <script src="app/ghost.js"></script>
+    <script src="app/render.js"></script>
+    <script src="app/drag.js"></script>
+    <script src="app/pointer.js"></script>
+    <script src="app/sidebar.js"></script>
+    <script src="app/tf.js"></script>
+    <script src="app/solution.js"></script>
+    <script src="app/export.js"></script>
+    <script src="app/keyboard.js"></script>
+    <script src="app/init.js"></script>
 </body>
 </html>
