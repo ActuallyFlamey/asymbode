@@ -46,7 +46,6 @@
 </header>
 
 <div id="tfError" class="tf-error" hidden></div>
-<div id="tfOk" class="tf-ok" hidden></div>
 
 <main class="workspace">
   <section class="plots">
@@ -55,7 +54,7 @@
       <div class="legend" id="legend">
         <span class="lg-item"><i class="lg-line user"></i>your asymptote</span>
         <span class="lg-item" id="lgSolution" hidden><i class="lg-line sol"></i>solution</span>
-        <span class="lg-item" id="lgExact" hidden><i class="lg-line exact"></i>real Bode (Ctrl)</span>
+        <span class="lg-item" id="lgExact" hidden><i class="lg-line exact"></i>real Bode</span>
         <span class="lg-item"><i class="lg-dot zero"></i>zero</span>
         <span class="lg-item"><i class="lg-dot pole"></i>pole</span>
         <span class="lg-item"><i class="lg-dot cplx"></i>complex pair</span>
@@ -116,10 +115,6 @@
                  placeholder="denominator" aria-label="Denominator of G(s)" value="1+10^{-4}s">
         </div>
       </div>
-      <div class="tf-actions">
-        <button id="btnLoad" class="btn primary" title="Parse the transfer function and start an exercise (Enter)">Load</button>
-        <span class="tf-hint">K · numerator over denominator · <kbd>Enter</kbd> to load</span>
-      </div>
       <div class="user-gain">
         <div class="user-gain-title">Your gain <span class="user-gain-sub">— drag the magnitude line</span></div>
         <div class="gain-row">
@@ -142,13 +137,10 @@
     <section class="panel help">
       <h3>Help</h3>
       <ul>
-        <li><b>K</b>, numerator &amp; denominator fields (sidebar) define <code>G(s) = K·N(s)/D(s)</code> — e.g. K <code>1</code>, <code>1</code> over <code>1+10^{-4}s</code>, or K <code>10*(1+s/10)</code>… / LaTeX like <code>\frac{1}{1+s}</code> in either field</li>
+        <li><b>K</b>, numerator &amp; denominator fields take plain maths — e.g. K <code>1</code>, <code>1</code> over <code>1+10^{-4}s</code>, or K <code>10*(1+s/10)</code>… — or LaTeX like <code>\frac{1}{1+s}</code> in either field</li>
         <li>Click on a plot with a Zero/Pole tool to place; click again on the same spot to increase its order (×2 → +40&nbsp;dB/dec…)</li>
         <li><b>Shift + hover</b> a marker (or just hover while placing) shows its raw power as a dotted line on the plot you're hovering — hidden when the pointer leaves the plot</li>
-        <li><b>Drag the line</b> vertically → gain · <b>drag a marker</b> → corner frequency · background drag pans · wheel zooms ω</li>
-        <li><b>Ctrl</b> (while the solution is shown) switches it to the real Bode plot</li>
-        <li>Keys: <code>V</code> select · <code>Z</code> zero · <code>P</code> pole · <code>C</code>/<code>X</code> complex · <code>D</code> delete · <code>F</code> fit · <code>Del</code> remove selected · <code>Esc</code> back to select · <code>Ctrl+Z</code>/<code>Ctrl+Y</code> undo/redo</li>
-        <li><b>Mirror edits across graphs</b> (Your elements panel, on by default): a pole/zero placed on one plot shows on both; switch it off to keep each graph's placements independent — the checker then verifies <b>each graph on its own</b>, so a corner, order or stray element that is wrong on just one plot is reported for that plot</li>
+        <li><code>Del</code> removes the selected element · <code>Esc</code> switches back to the Select tool</li>
       </ul>
     </section>
   </aside>

@@ -1039,18 +1039,6 @@ function updateTfPreview() {
     els.denInput.value);
 }
 
-function tfSummary(tf) {
-  const parts = [];
-  parts.push('K = ' + fmtNum(tf.gain));
-  if (tf.z0) parts.push('s' + supStr(tf.z0));
-  if (tf.p0) parts.push('1/s' + supStr(tf.p0));
-  for (const z of tf.zeros)
-    parts.push((z.kind === 'complex' ? 'zero pair' : 'zero') + '@' + fmtW(BM.freqOf(z)) + (z.order > 1 ? ' ×' + z.order : ''));
-  for (const p of tf.poles)
-    parts.push((p.kind === 'complex' ? 'pole pair' : 'pole') + '@' + fmtW(BM.freqOf(p)) + (p.order > 1 ? ' ×' + p.order : ''));
-  return parts.join(' · ');
-}
-
 function loadTF() {
   const raw = tfRawExpr();
   try {
@@ -1063,7 +1051,6 @@ function loadTF() {
     if (els.lgExact) els.lgExact.hidden = true;
     if (els.checkResults)
       els.checkResults.innerHTML = '<div class="empty-hint">Load a transfer function, draw your asymptote, then press <b>Show solution &amp; Check</b>.</div>';
-    showMsg(els.tfOk, 'G(s) loaded — ' + tfSummary(tf), true);
     showMsg(els.tfError, '', false);
     setStatus('Transfer function loaded — place poles &amp; zeroes to match its Bode plot, then <b>Show solution &amp; Check</b>');
     return tf;
@@ -1071,7 +1058,6 @@ function loadTF() {
     state.tf = null;
     state.tfState = null;
     showMsg(els.tfError, 'G(s) error: ' + err.message, true);
-    showMsg(els.tfOk, '', false);
     setStatus('Could not parse the transfer function');
     return null;
   }
@@ -1260,11 +1246,10 @@ function renderCheck(res) {
   const box = els.checkResults;
   box.innerHTML = '';
   const allOk = res.score.ok === res.score.total;
-  const perGraph = res.items.some(it => it.plot);
   const score = document.createElement('div');
   score.className = 'check-score ' + (allOk ? 'good' : 'bad');
   score.textContent = res.score.ok + ' / ' + res.score.total + ' correct' +
-    (allOk ? ' — perfect!' : (perGraph ? ' · each graph checked on its own' : ''));
+    (allOk ? ' — perfect!' : '');
   box.appendChild(score);
   for (const it of res.items) {
     const row = document.createElement('div');
@@ -1293,7 +1278,7 @@ function renderCheck(res) {
 
 function showSolutionAndCheck() {
   if (!state.tf) {
-    setStatus('Load a transfer function first — enter the numerator &amp; denominator in the sidebar and press <b>Load</b>');
+    setStatus('Fix the transfer function in the sidebar — it loads automatically when you leave a field');
     return;
   }
   const res = BM.checkSolution(state.tf, state.user);
@@ -1430,7 +1415,6 @@ function init() {
   els.denInput = document.getElementById('denInput');
   els.tfRender = document.getElementById('tfRender');
   els.tfError = document.getElementById('tfError');
-  els.tfOk = document.getElementById('tfOk');
   els.elemList = document.getElementById('elemList');
   els.z0Count = document.getElementById('z0Count');
   els.p0Count = document.getElementById('p0Count');
@@ -1450,12 +1434,13 @@ function init() {
     btn.addEventListener('click', () => setTool(btn.dataset.tool));
   });
 
-  document.getElementById('btnLoad').addEventListener('click', loadTF);
   for (const inp of [els.kInput, els.numInput, els.denInput]) {
     inp.addEventListener('input', updateTfPreview);
+    inp.addEventListener('blur', loadTF);
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadTF(); });
   }
   updateTfPreview();
+  loadTF();
 
   document.getElementById('btnClear').addEventListener('click', clearUser);
   document.getElementById('btnFit').addEventListener('click', fitView);

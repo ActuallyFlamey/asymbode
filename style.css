@@ -71,8 +71,6 @@ body {
 }
 .btn:hover { background: #212c3e; border-color: #3d4e68; }
 .btn:active { transform: translateY(1px); }
-.btn.primary { background: #173a52; border-color: #2a6f96; }
-.btn.primary:hover { background: #1c4a68; }
 .btn.accent { background: #2b2350; border-color: #5b4bb8; }
 .btn.accent:hover { background: #352b64; }
 .btn.active { background: #2b2350; border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent2) inset; }
@@ -113,13 +111,12 @@ body {
 .tool[data-tool="delete"].active { background: var(--amber); border-color: var(--amber); }
 
 /* ---------- messages ---------- */
-.tf-error, .tf-ok {
+.tf-error {
   padding: 6px 14px;
   font-family: var(--mono);
   font-size: 13px;
 }
 .tf-error { background: #3d1518; color: #ff9b9b; border-bottom: 1px solid #5c2226; }
-.tf-ok { background: #11331f; color: #7ee2b0; border-bottom: 1px solid #1d4f33; }
 
 /* ---------- transfer-function panel ---------- */
 .tf-render {
@@ -208,17 +205,6 @@ body {
   height: 0;
   border-top: 2px solid var(--border2);
   margin: 0 7px;
-}
-.tf-actions { display: flex; align-items: center; gap: 9px; }
-.tf-hint { font-size: 11px; color: var(--muted); }
-.tf-hint kbd {
-  background: var(--panel2);
-  border: 1px solid var(--border2);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 0 4px;
-  font-family: var(--mono);
-  font-size: 10px;
 }
 .user-gain {
   margin-top: 10px;
