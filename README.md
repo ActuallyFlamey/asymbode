@@ -15,7 +15,7 @@ Simply **clone the repo** and open [`index.html`](./index.html) in your browser 
 - Use the **Zero**, **Pole**, **Complex Zero**, and **Complex Pole** drawing tools to put them where you think they should be.
   - For studying, you might want to **disable** the "*Mirror edits across graphs*" option, so that you can draw the two graphs one by one.
 - In **Select** mode, you can also **drag the line** to give it a **constant gain**.
-- **Zoom**: drag the background to **pan**; the **mouse wheel** over a plot zooms the **whole view** (ω and dB/° scale together, so the curves keep their shape), while the wheel over an axis (the margins holding the labels) scales **only that axis**.
+- **Zoom**: drag the background to **pan**; the **mouse wheel** over a plot zooms the **whole view** (ω and dB/° scale together, so the curves keep their shape), while the wheel over an axis (the margins holding the labels) scales **only that axis**. The **ticks follow the zoom**: the axes show finer steps the closer you look, and once a decade is wide enough the ω axis also labels the values in between (`2·10¹`, `3·10¹` …).
 - When you're done, press "**Show solution & Check**":
   - A line showing the **correct plot** will appear on the graphs.
   - A **checklist** of your **mistakes** (or lack thereof) will appear on the **sidebar**.

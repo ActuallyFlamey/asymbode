@@ -6,7 +6,7 @@
 const state = A.state;
 const BM = window.BodeMath;
 const { DARK } = A;
-const { fmtDecade } = A;
+const { fmtDecade, supStr } = A;
 const { geom, xToPx, yToPx, yTickStep } = A;
 const { elemOnPlot } = A;
 
@@ -50,7 +50,7 @@ function drawAxes(ctx, w, h, yr, opts) {
         ctx.strokeStyle = DARK.grid;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        for (const k of decs) {
+        for (let k = Math.floor(state.view.xmin); k <= Math.ceil(state.view.xmax); k++) {
             for (let m = 2; m <= 9; m++) {
                 const x = xToPx(k + Math.log10(m), g);
                 if (x >= g.l && x <= g.r) { ctx.moveTo(x + .5, g.t); ctx.lineTo(x + .5, g.b); }
@@ -97,13 +97,43 @@ function drawAxes(ctx, w, h, yr, opts) {
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
+    // Every label keeps clear of its neighbours and of the unit caption that
+    // sits in the right-hand corner of the same row.
+    const UNIT_RESERVE = 66;
+    const placed = [];
+    const put = (t, x) => {
+        const w = ctx.measureText(t).width;
+        ctx.fillText(t, x, g.b + 7);
+        placed.push({ x, w });
+    };
+    const free = (t, x) => {
+        const w = ctx.measureText(t).width;
+        if (x + w / 2 > g.r - UNIT_RESERVE) return false;
+        return placed.every(p => Math.abs(p.x - x) * 2 >= p.w + w + 12);
+    };
+
     const labelStep = Math.max(1, Math.ceil(decs.length / 14));
     decs.forEach((k, i) => {
         if (i % labelStep !== 0) return;
         const x = xToPx(k, g);
         if (x < g.l - 1 || x > g.r + 1) return;
-        ctx.fillText(fmtDecade(k), x, g.b + 7);
+        const t = fmtDecade(k);
+        if (x + ctx.measureText(t).width / 2 <= g.r - UNIT_RESERVE) put(t, x);
     });
+
+    // 2…9 × 10ᵏ get labelled too while zoomed in — "2·10¹", or plain "2" in
+    // the 10⁰ decade — once a decade is wide enough to hold one comfortably.
+    const MINOR_LABEL_PX = 120;
+    if (minor && g.w / spanDec >= MINOR_LABEL_PX) {
+        for (let k = Math.floor(state.view.xmin); k <= Math.ceil(state.view.xmax); k++) {
+            for (let m = 2; m <= 9; m++) {
+                const x = xToPx(k + Math.log10(m), g);
+                if (x < g.l || x > g.r) continue;
+                const t = k === 0 ? String(m) : m + '·10' + supStr(k);
+                if (free(t, x)) put(t, x);
+            }
+        }
+    }
 
     ctx.fillStyle = DARK.title;
     ctx.font = '600 11px system-ui, sans-serif';

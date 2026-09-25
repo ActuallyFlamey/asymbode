@@ -130,11 +130,14 @@ function selfTest() {
 
     function stubCtx() {
         const labels = [];
+        const moves = [];
         return {
-            labels, fillStyle: '', strokeStyle: '', lineWidth: 1, font: '',
+            labels, moves, fillStyle: '', strokeStyle: '', lineWidth: 1, font: '',
             textAlign: '', textBaseline: '',
+            measureText(t) { return { width: String(t).length * 6 }; },
             fillRect() {}, save() {}, restore() {}, beginPath() {}, rect() {},
-            clip() {}, moveTo() {}, lineTo() {}, stroke() {}, strokeRect() {},
+            clip() {}, moveTo(x, y) { moves.push([x, y]); }, lineTo() {},
+            stroke() {}, strokeRect() {},
             fillText(t) { labels.push(String(t)); },
         };
     }
@@ -153,6 +156,31 @@ function selfTest() {
     labs = axisLabels({ min: -9, max: 9, step: 45 }, true);
     ok(labs.indexOf('-5°') >= 0 && labs.indexOf('5°') >= 0,
         'drawAxes: zoomed phase window labels 5° ticks', JSON.stringify(labs));
+
+    // ---- x-axis: minor decades get labelled while zoomed in ----
+    const savedView = JSON.stringify(state.view);
+    state.view = { xmin: 1, xmax: 2 };
+    labs = axisLabels({ min: -40, max: 40 }, false);
+    ok(labs.indexOf('10¹') >= 0, 'drawAxes: major decade label survives', JSON.stringify(labs));
+    ok(labs.indexOf('2·10¹') >= 0, 'drawAxes: minor label 2·10¹', JSON.stringify(labs));
+    ok(labs.indexOf('3·10¹') >= 0, 'drawAxes: minor label 3·10¹', JSON.stringify(labs));
+    state.view = { xmin: 0.4, xmax: 1.2 };
+    labs = axisLabels({ min: -40, max: 40 }, false);
+    ok(labs.indexOf('5') >= 0, 'drawAxes: 10⁰ decade labels plain mantissas', JSON.stringify(labs));
+    state.view = { xmin: -3, xmax: 3 };
+    labs = axisLabels({ min: -40, max: 40 }, false);
+    ok(!labs.some(t => t.indexOf('·10') >= 0),
+        'drawAxes: no minor labels while a decade is under 120 px', JSON.stringify(labs));
+    ok(labs.indexOf('10³') < 0, 'drawAxes: last decade yields to the unit caption',
+        JSON.stringify(labs));
+    // gridlines cover decades that are only partly inside the view
+    state.view = { xmin: 0.4, xmax: 3.4 };
+    const minorCtx = stubCtx();
+    drawAxes(minorCtx, 600, 400, { min: -40, max: 40 }, { yUnit: 'dB', isPhase: false });
+    const halfDecade = xToPx(Math.log10(5), g) + 0.5;
+    ok(minorCtx.moves.some(([x, y]) => y === g.t && Math.abs(x - halfDecade) < 1e-9),
+        'drawAxes: minor gridline in the partially visible 10⁰ decade');
+    state.view = JSON.parse(savedView);
 
     // ---- the wheel handler, end to end on a stubbed canvas ----
     const savedState = JSON.stringify({ v: state.view, m: state.yMag, p: state.yPh });

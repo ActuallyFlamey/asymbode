@@ -308,6 +308,33 @@ async function main() {
         ok(dBticks.some(v => v % 20 !== 0), 'zoomed-in magnitude axis shows sub-20 dB ticks',
             JSON.stringify(tickLabels));
 
+        // --- x-axis: minor decades get labelled once zoomed in ---
+        await reset();
+        const minorLabels = await evalPage(`(() => {
+            const s = window.__bode.state;
+            s.view.xmin = 1; s.view.xmax = 2;
+            const proto = window.CanvasRenderingContext2D.prototype;
+            const orig = proto.fillText;
+            const seen = [];
+            proto.fillText = function (t) { seen.push(String(t)); return orig.apply(this, arguments); };
+            try { window.__bode.render(); } finally { proto.fillText = orig; }
+            return seen; })()`);
+        ok(minorLabels.indexOf('2·10¹') >= 0 && minorLabels.indexOf('3·10¹') >= 0,
+            'zoomed x-axis labels the minor decades', JSON.stringify(minorLabels));
+
+        // no decade tick lands on top of the unit caption in the corner
+        await reset();
+        const edge = await evalPage(`(() => {
+            const proto = window.CanvasRenderingContext2D.prototype;
+            const orig = proto.fillText;
+            const seen = [];
+            proto.fillText = function (t, x) { seen.push({ t: String(t), x: x }); return orig.apply(this, arguments); };
+            try { window.__bode.render(); } finally { proto.fillText = orig; }
+            const g = window.BodeApp.geom(window.BodeApp.canvas.magW, window.BodeApp.canvas.magH);
+            return { seen: seen, r: g.r }; })()`);
+        const stray = edge.seen.filter(l => l.t !== 'ω [rad/s]' && l.x > edge.r - 60);
+        ok(stray.length === 0, 'no x label collides with the unit caption', JSON.stringify(stray));
+
         await reset();
     } finally {
         if (ws) try { ws.close(); } catch (_) { /* ok */ }
